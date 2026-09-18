@@ -5,6 +5,7 @@
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
 //!   demonnapse audio [secondi]                                               picco dell'uscita audio, 10 letture al secondo
+//!   demonnapse synapse [--kill NOME.exe]                                      Synapse aperto? admin? stato dei servizi Razer
 //!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
 
 #[macro_use]
@@ -16,6 +17,7 @@ mod extract;
 mod layers;
 mod profiles;
 mod razerhid;
+mod synapse;
 
 use config::Config;
 use effect::Effect;
@@ -130,6 +132,25 @@ fn audio(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn synapse(args: &[String]) -> Result<(), String> {
+    if let Some(name) = args.iter().position(|a| a == "--kill").and_then(|i| args.get(i + 1)) {
+        synapse::kill(&[name.to_lowercase().as_str()]); // per provare la chiusura su un processo innocuo
+        return Ok(());
+    }
+    println!("synapse aperto: {}", synapse::running());
+    println!("amministratore: {}", synapse::is_admin());
+    for (name, state) in synapse::service_states() {
+        let state = match state {
+            None => "non installato".to_string(),
+            Some(1) => "STOPPED".to_string(),
+            Some(4) => "RUNNING".to_string(),
+            Some(n) => format!("stato {n}"),
+        };
+        println!("{name}: {state}");
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
@@ -138,7 +159,8 @@ fn main() {
         Some("extract") => extract(&args[1..]),
         Some("profiles") => profiles(),
         Some("audio") => audio(&args[1..]),
-        _ => Err("comandi: render, probe, extract, profiles, audio (il demone vero arriva nei prossimi passi del port)".into()),
+        Some("synapse") => synapse(&args[1..]),
+        _ => Err("comandi: render, probe, extract, profiles, audio, synapse (il demone vero arriva nei prossimi passi del port)".into()),
     };
     if let Err(e) = result {
         eprintln!("errore: {e}");
