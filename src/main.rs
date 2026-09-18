@@ -3,12 +3,16 @@
 //! Per ora solo gli strumenti per verificare il port pezzo per pezzo:
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
+//!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
 //!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
 
+#[macro_use]
+mod log;
 mod config;
 mod effect;
 mod extract;
 mod layers;
+mod profiles;
 mod razerhid;
 
 use config::Config;
@@ -104,13 +108,24 @@ salvato: {}
     Ok(())
 }
 
+fn profiles() -> Result<(), String> {
+    let dir = home();
+    let cfg = Config::load(&dir)?;
+    let grid = cfg.grid();
+    let active = profiles::load(&dir, &cfg, &grid, &Canvas::new(&grid, cfg.device.leds), 1)?;
+    let out: Vec<Value> = active.iter().map(|a| json!({"slot": a.slot, "name": a.name, "effect": a.effect.title})).collect();
+    println!("{}", Value::from(out));
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("render") => render(&args[1..]),
         Some("probe") => probe(),
         Some("extract") => extract(&args[1..]),
-        _ => Err("comandi: render, probe, extract (il demone vero arriva nei prossimi passi del port)".into()),
+        Some("profiles") => profiles(),
+        _ => Err("comandi: render, probe, extract, profiles (il demone vero arriva nei prossimi passi del port)".into()),
     };
     if let Err(e) = result {
         eprintln!("errore: {e}");

@@ -1,4 +1,5 @@
-"""Confronta l'estrazione dai log di Synapse fatta da Rust con quella di Python (il riferimento).
+"""Confronta l'estrazione dai log di Synapse e l'abbinamento profilo-effetto fatti da Rust
+con quelli di Python (il riferimento).
 
 Uso:  python tools/parity_extract.py    (dopo `cargo build --release`)
 
@@ -8,10 +9,13 @@ import json
 import os
 import subprocess
 import sys
+import logging
 import tempfile
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, HERE)
+logging.basicConfig(level=logging.ERROR)
+import demonnapse as d
 import extract_effects as ex
 
 EXE = os.path.join(HERE, "target", "release", "demonnapse.exe")
@@ -37,7 +41,15 @@ def main():
                 for k in sorted(set(a) | set(b)):
                     if a.get(k) != b.get(k):
                         print("   diverso:", k)
-    print("\n%s" % ("tutto coincide" if not failed else "%d file diversi" % failed))
+    # abbinamento profilo -> effetto, sui file che il demone usa davvero
+    cfg, _ = d.load()
+    out = subprocess.run([EXE, "profiles"], capture_output=True, text=True, cwd=HERE)
+    if out.returncode:
+        raise RuntimeError(out.stderr.strip())
+    ok = json.loads(out.stdout) == cfg["profiles"]
+    failed += not ok
+    print("%-26s %s | %s" % ("profilo -> effetto", "OK" if ok else "DIVERSO", out.stdout.strip()))
+    print("\n%s" % ("tutto coincide" if not failed else "%d confronti diversi" % failed))
     return failed
 
 

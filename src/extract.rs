@@ -1,7 +1,7 @@
 //! Legge dai log di Synapse l'ultima definizione di ogni effetto Chroma Studio e i profili
 //! del mouse con il loro slot onboard. Scrive chroma_effects_dump.json e synapse_profiles.json.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
     Ok(effects)
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Profile {
     pub name: String,
     pub slot: u8,
