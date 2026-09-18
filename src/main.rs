@@ -3,9 +3,11 @@
 //! Per ora solo gli strumenti per verificare il port pezzo per pezzo:
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
+//!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
 
 mod config;
 mod effect;
+mod extract;
 mod layers;
 mod razerhid;
 
@@ -86,12 +88,29 @@ fn probe() -> Result<(), String> {
     Ok(())
 }
 
+fn extract(args: &[String]) -> Result<(), String> {
+    let dir = home();
+    let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).map_or(dir.clone(), PathBuf::from);
+    let cfg = Config::load(&dir)?;
+    for (title, effect) in &extract::effects(&out)? {
+        println!("{}", extract::summary(title, effect));
+    }
+    println!("
+salvato: {}
+", out.join("chroma_effects_dump.json").display());
+    for p in extract::profiles(&out, cfg.pid())? {
+        println!("slot {}: {}", p.slot, p.name);
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("render") => render(&args[1..]),
         Some("probe") => probe(),
-        _ => Err("comandi: render, probe (il demone vero arriva nei prossimi passi del port)".into()),
+        Some("extract") => extract(&args[1..]),
+        _ => Err("comandi: render, probe, extract (il demone vero arriva nei prossimi passi del port)".into()),
     };
     if let Err(e) = result {
         eprintln!("errore: {e}");
