@@ -6,6 +6,7 @@ Trova da solo il processo: pythonw/python con demonnapse.py, oppure demonnapse.e
 """
 import collections
 import socket
+import subprocess
 import sys
 import time
 
@@ -33,7 +34,12 @@ def private_ws(p):
     try:
         return p.memory_full_info().uss / 2**20
     except psutil.Error:
-        return float("nan")
+        pass
+    # processo elevato (la task gira con privilegi alti): lo chiedo ai contatori di Windows
+    out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                          "(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter 'IDProcess=%d').WorkingSetPrivate" % p.pid],
+                         capture_output=True, text=True).stdout.strip()
+    return int(out) / 2**20 if out.isdigit() else float("nan")
 
 
 def main():
@@ -46,19 +52,16 @@ def main():
     sock.settimeout(0.2)
     frames = collections.Counter()
     cpu0, t0, n = sum(p.cpu_times()[:2]), time.monotonic(), 0
-    mem = []
     while time.monotonic() - t0 < SECONDS:
         try:
             frames[sock.recv(256)] += 1
             n += 1
         except socket.timeout:
             pass
-        if len(mem) < int(time.monotonic() - t0):
-            mem.append((private_ws(p), p.memory_info().rss / 2**20))
     dt = time.monotonic() - t0
     cpu = sum(p.cpu_times()[:2]) - cpu0
     print("CPU: %.2f%% di un core (%.2fs su %.0fs)" % (100 * cpu / dt, cpu, dt))
-    print("RAM: private working set %.1f MB, working set %.1f MB" % (max(m[0] for m in mem), max(m[1] for m in mem)))
+    print("RAM: private working set %.1f MB, working set %.1f MB" % (private_ws(p), p.memory_info().rss / 2**20))
     print("frame UDP: %d (%.1f/s), %d diversi" % (n, n / dt, len(frames)))
     for f, c in frames.most_common(3):
         print("  x%-5d %s" % (c, " ".join(f[i:i + 3].hex().upper() for i in range(0, len(f), 3))))
