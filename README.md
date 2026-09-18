@@ -1,5 +1,10 @@
 # DemonNapse
 
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
+![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
+
 Lightweight replacement for Razer Synapse's RGB engine on Windows. Keep designing your
 profiles and Chroma Studio effects in Synapse, close it, and a ~6 MB Python daemon takes
 over: one RGB effect per on-board profile, switched with the profile button under the mouse,
@@ -16,7 +21,7 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 
 | | Synapse 4 + services | DemonNapse |
 |---|---|---|
-| RAM | ~650 MB + 168 MB | ~6–27 MB |
+| RAM (as shown by Task Manager) | ~650 MB + 168 MB | ~6–27 MB |
 | CPU (audio-reactive effect) | — | ~0.4 % of one core |
 | Chroma Studio effect per on-board profile | no | yes |
 
@@ -61,7 +66,8 @@ effect has an Audio Meter, it has priority: static/reactive layers only show aft
    with elevated rights (needed to stop/start Razer services), removes Synapse from Windows
    autostart, sets the Razer services to manual start and launches the daemon.
 
-Log: `demonnapse.log` next to the scripts. Debug run: `python demonnapse.py -v`.
+Log: `demonnapse.log` next to the scripts (native crashes, if any, leave a traceback in
+`demonnapse.crash.log`). Debug run: `python demonnapse.py -v`.
 
 To go back exactly to how things were: `uninstall.cmd` as administrator.
 
