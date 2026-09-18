@@ -20,7 +20,9 @@ import time
 import hid
 import psutil
 
+import chroma_layers as cl
 import razerhid as rz
+from chroma_layers import BLACK, gradient, lerp, rgb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger("demonnapse")
@@ -28,26 +30,8 @@ logging.getLogger("comtypes").setLevel(logging.WARNING)
 
 # posizione nella griglia di Chroma Studio -> indice LED fisico (dal config: dipende dal mouse)
 GRID = {}
-BLACK = (0, 0, 0)
 PAIR_WINDOW = 0.25  # s: "05 02" seguito da "05 39" entro questo tempo = cambio profilo
 VK_BUTTONS = (0x01, 0x02, 0x04, 0x05, 0x06)  # sx, dx, centrale, laterali
-
-
-def rgb(c):
-    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
-
-
-def lerp(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
-
-
-def gradient(stops, pos):
-    """stops: [(0..100, rgb)], pos: 0..1"""
-    p = pos * 100
-    for (s0, c0), (s1, c1) in zip(stops, stops[1:]):
-        if p <= s1:
-            return lerp(c0, c1, (p - s0) / (s1 - s0) if s1 > s0 else 0)
-    return stops[-1][1]
 
 
 # ---------------------------------------------------------------- audio
@@ -86,7 +70,7 @@ class Effect:
     def __init__(self, spec, cfg):
         self.title = spec["title"]
         self.cfg = cfg
-        self.static = [BLACK] * rz.NUM_LEDS
+        self.base = []       # fondo, dal basso verso l'alto: layer di chroma_layers
         self.audio = []      # (leds, stops, boost, decay)
         self.reactive = []   # (leds, color|None, duration_s)
         self.flashes = []    # (leds, color, t0, duration_s)
@@ -99,9 +83,8 @@ class Effect:
             for reg in layer["regions"]:
                 leds = [GRID[(l["row"], l["col"])] for d in reg["devices"] for l in d["leds"]]
                 p = reg["params"]
-                if layer["name"] == "static":
-                    for i in leds:
-                        self.static[i] = rgb(p["color"]) if "color" in p else BLACK
+                if layer["name"] in cl.LAYERS:
+                    self.base.append(cl.LAYERS[layer["name"]](leds, p, layer.get("params") or {}))
                 elif layer["name"] == "audio":
                     stops = [(s["Stop"], rgb(s["Color"])) for s in p["colorStops"]]
                     self.audio.append((leds, stops, p.get("boost", 1), p.get("decay", 0.5)))
@@ -110,12 +93,16 @@ class Effect:
                     self.reactive.append((leds, color, p.get("duration", 1500) / 1000))
                 else:
                     log.warning("%s: layer '%s' non supportato, ignorato", self.title, layer["name"])
+                    break   # un avviso per layer, non uno per regione
 
     @property
     def needs_clicks(self):
-        return bool(self.reactive)
+        return bool(self.reactive) or any(l.on_press for l in self.base)
 
     def on_click(self, now):
+        for l in self.base:
+            if l.on_press:
+                l.press(now)
         for leds, color, dur in self.reactive:
             c = color or rgb(random.choice((0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF)))
             self.flashes.append((leds, c, now, dur))
@@ -142,7 +129,9 @@ class Effect:
                     for i in leds:
                         frame[i] = c
             return frame
-        frame = list(self.static)
+        frame = [BLACK] * rz.NUM_LEDS
+        for l in self.base:
+            l.paint(now, frame)
         self.flashes = [f for f in self.flashes if now - f[2] < f[3]]
         for leds, color, t0, dur in self.flashes:
             k = 1.0 - (now - t0) / dur
@@ -265,6 +254,7 @@ def load():
     rz.configure(int(dev["pid"], 16), dev["leds"])
     GRID.clear()
     GRID.update({(int(k.split(",")[0]), int(k.split(",")[1])): v for k, v in dev["chroma_grid"].items()})
+    cl.set_positions(GRID)
     dump = json.load(open(os.path.join(HERE, "chroma_effects_dump.json"), encoding="utf-8"))
     synapse = json.load(open(os.path.join(HERE, "synapse_profiles.json"), encoding="utf-8"))
     profiles, effects = [], []

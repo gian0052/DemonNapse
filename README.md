@@ -40,7 +40,7 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 | | Synapse 4 + services | DemonNapse |
 |---|---|---|
 | RAM (as shown by Task Manager) | ~650 MB + 168 MB | ~6–27 MB |
-| CPU (audio-reactive effect) | — | ~0.4 % of one core |
+| CPU (measured over an evening of normal use and gaming) | — | ~1 % of one core |
 | Chroma Studio effect per on-board profile | no | yes |
 
 ## How it compares
@@ -66,7 +66,7 @@ like Chroma Studio and only want it to stop running all day.
 1. **Synapse stays your editor.** Profiles, key bindings, DPI stages and Chroma Studio effects
    are designed in Synapse/Chroma as usual. Synapse writes all of it to its own log files.
 2. **The daemon reads those logs** (`extract_effects.py`): the layers of every Chroma Studio
-   effect (static, audio meter, reactive) and the on-board slot of every profile.
+   effect, whatever its type, and the on-board slot of every profile.
 3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
    `DOTA 2` → `Chroma Effect DOTA`. Words in common win; `effect_overrides` in `config.json`
    forces a match when the names differ.
@@ -80,10 +80,16 @@ like Chroma Studio and only want it to stop running all day.
    the mouse and waits. When you close Synapse it re-reads effects and profiles, stops the
    services and takes the mouse back. You never touch a terminal.
 
-Supported layers: **Static**, **Audio Meter** (system output peak via
-`IAudioMeterInformation`, no audio capture), **Reactive** (mouse button flash). When an
-effect has an Audio Meter, it has priority: static/reactive layers only show after
-`audio_idle_delay` seconds of silence.
+Supported layers: **Static**, **Spectrum Cycling**, **Wave**, **Wheel**, **Tidal**, **Ripple**,
+**Starlight**, **Breathing**, **Fire**, **Audio Meter** (system output peak via
+`IAudioMeterInformation`, no audio capture) and **Reactive** (mouse button flash), stacked in
+the same order as in Chroma Studio. When an effect has an Audio Meter, it has priority: the
+other layers only show after `audio_idle_delay` seconds of silence. Not supported yet:
+**Ambient Awareness** (it needs screen capture).
+
+Razer does not document what "speed 15" or "width 100" mean, so timings are calibrated by eye
+(constants at the top of `chroma_layers.py`). To compare an effect with Synapse without
+assigning it to a profile: `python tools/preview.py "Chroma Effect X" 30`.
 
 ## Requirements
 
@@ -133,7 +139,8 @@ your mouse sends when you press the profile button. Reports and pull requests we
   If an update breaks extraction, the daemon keeps the last known effects.
 - It uses only user-mode APIs (`hidapi` feature reports, `GetAsyncKeyState`, WASAPI meter),
   the same approach as OpenRGB/OpenRazer. Not tested against anti-cheat systems.
-- Chroma Studio layers other than Static/Audio Meter/Reactive are ignored with a warning.
+- Every Chroma Studio layer is imported; all of them are rendered except Ambient Awareness,
+  which is ignored with a warning. Speeds and widths may differ slightly from Synapse.
 
 ## Acknowledgements
 
