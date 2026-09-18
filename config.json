@@ -1,0 +1,30 @@
+{
+  "_nota": "I profili e i loro slot vengono letti da Synapse (synapse_profiles.json). L'effetto Chroma viene abbinato per parole in comune nei nomi (es. 'CS2' <-> 'Chroma Effect CS2'); effect_overrides forza l'abbinamento quando i nomi non coincidono, es. {\"Nome profilo\": \"Chroma Effect X\"}. skip_slots: slot da saltare (1 = Hybrid Storage, pallino bianco).",
+  "device": {
+    "_nota": "PID USB del mouse (Basilisk V3 35K cablato = 0x00CB) e numero di LED. chroma_grid: posizione 'riga,colonna' nella griglia di Chroma Studio -> indice LED fisico.",
+    "name": "Razer Basilisk V3 35K",
+    "pid": "0x00CB",
+    "leds": 11,
+    "chroma_grid": {
+      "5,2": 0,
+      "0,2": 1,
+      "1,0": 2,
+      "2,0": 3,
+      "3,0": 4,
+      "4,0": 5,
+      "6,0": 6,
+      "6,4": 7,
+      "4,4": 8,
+      "2,4": 9,
+      "0,4": 10
+    }
+  },
+  "effect_overrides": {},
+  "skip_slots": [
+    1
+  ],
+  "fps": 60,
+  "audio_silence_floor": 0.02,
+  "audio_gain": 1.0,
+  "audio_idle_delay": 3.0
+}

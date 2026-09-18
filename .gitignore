@@ -1,0 +1,15 @@
+# dati personali generati dal demone (serial number del mouse, nomi profili, GUID)
+chroma_effects_dump*.json
+synapse_profiles.json
+*.log
+*.err
+run.*
+wall.*
+# esperimento wallpaper: lavoro in corso, non ancora pubblicato
+experimental/
+wallpapers/
+# note personali di lavori vecchi non legati al progetto
+archivio/
+# python
+__pycache__/
+*.pyc
