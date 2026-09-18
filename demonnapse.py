@@ -59,13 +59,14 @@ class PeakMeter:
         self.acquired = 0.0
 
     def _acquire(self):
-        from ctypes import POINTER, cast
         from comtypes import CLSCTX_ALL
         from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
         dev = AudioUtilities.GetSpeakers()
         dev = getattr(dev, "_dev", dev)  # pycaw recente incapsula l'IMMDevice
-        self.meter = cast(dev.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None),
-                          POINTER(IAudioMeterInformation))
+        # QueryInterface e non cast(): cast() duplica il puntatore senza AddRef, e alla
+        # riacquisizione la doppia Release manda in access violation tutto il processo
+        self.meter = dev.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None) \
+                        .QueryInterface(IAudioMeterInformation)
         self.acquired = time.monotonic()
 
     def peak(self):
@@ -391,6 +392,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # i crash nativi (access violation in una DLL) non passano da except: li scrivo su file
+    import faulthandler
+    faulthandler.enable(open(os.path.join(HERE, "demonnapse.crash.log"), "a"))
     try:
         main()
     except KeyboardInterrupt:
