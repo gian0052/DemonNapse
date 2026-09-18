@@ -31,13 +31,12 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
-/// Cartella con config.json e i file estratti: accanto all'eseguibile, altrimenti quella corrente.
+/// Cartella con config.json e i file estratti: accanto all'eseguibile o poco sopra (l'exe compilato
+/// sta in target/release), altrimenti quella corrente.
 fn home() -> PathBuf {
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from));
-    match exe_dir {
-        Some(d) if d.join("config.json").exists() => d,
-        _ => std::env::current_dir().unwrap_or_default(),
-    }
+    let exe = std::env::current_exe().unwrap_or_default();
+    let found = exe.ancestors().skip(1).take(3).find(|d| d.join("config.json").exists());
+    found.map_or_else(|| std::env::current_dir().unwrap_or_default(), PathBuf::from)
 }
 
 fn load_json(path: PathBuf) -> Result<Value, String> {

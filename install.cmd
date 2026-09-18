@@ -2,11 +2,10 @@
 :: DemonNapse - installazione (eseguire come AMMINISTRATORE: tasto destro > Esegui come amministratore)
 setlocal
 set DIR=%~dp0
-set "PYW="
-for /f "delims=" %%P in ('where pythonw 2^>nul') do (
-    echo %%P | find /i "WindowsApps" >nul || if not defined PYW set "PYW=%%P"
-)
-if not defined PYW ( echo pythonw.exe non trovato: installa Python 3 e aggiungilo al PATH & pause & exit /b 1 )
+:: l'eseguibile della release sta accanto a questo file; quello compilato da sorgente in target\release
+set "EXE=%DIR%demonnapse.exe"
+if not exist "%EXE%" set "EXE=%DIR%target\release\demonnapse.exe"
+if not exist "%EXE%" ( echo demonnapse.exe non trovato: scaricalo dalla release oppure compila con "cargo build --release" & pause & exit /b 1 )
 
 net session >nul 2>&1
 if errorlevel 1 (
@@ -19,9 +18,11 @@ echo [1/4] Attivita' pianificata "DemonNapse" all'accesso, con privilegi elevati
 schtasks /End /TN "DemonNapse" >nul 2>&1
 schtasks /End /TN "RazerLite" >nul 2>&1
 schtasks /End /TN "RazerLiteWallpaper" >nul 2>&1
+taskkill /F /IM demonnapse.exe >nul 2>&1
+:: anche il vecchio demone in Python, se e' ancora installato
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'demonnapse.py|experimental\wallpaper.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 schtasks /Create /F /TN "DemonNapse" /SC ONLOGON /DELAY 0000:10 /RL HIGHEST /IT ^
-    /TR "\"%PYW%\" \"%DIR%demonnapse.py\"" >nul
+    /TR "\"%EXE%\"" >nul
 if errorlevel 1 ( echo   ERRORE nella creazione dell'attivita' & pause & exit /b 1 )
 :: vecchi nomi / esperimenti: tolgo le attivita' se esistono
 schtasks /Delete /F /TN "RazerLite" >nul 2>&1

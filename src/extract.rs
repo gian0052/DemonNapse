@@ -65,6 +65,9 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
             }
         }
     }
+    if effects.is_empty() {
+        return Err("nessun effetto Chroma nei log di Synapse".into()); // non sovrascrivo un dump buono con uno vuoto
+    }
     write_json(&dir.join("chroma_effects_dump.json"), &effects)?;
     Ok(effects)
 }
@@ -101,6 +104,9 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
     // se due profili risultano sullo stesso slot vince l'ultimo visto
     let by_slot: BTreeMap<u8, Profile> = last.into_iter().map(|(_, p)| (p.slot, p)).collect();
     let profiles: Vec<Profile> = by_slot.into_values().collect();
+    if profiles.is_empty() {
+        return Err("nessun profilo del mouse nei log di Synapse".into());
+    }
     write_json(&dir.join("synapse_profiles.json"), &profiles)?;
     Ok(profiles)
 }

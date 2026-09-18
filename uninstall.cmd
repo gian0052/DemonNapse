@@ -14,6 +14,7 @@ for %%T in ("DemonNapse" "RazerLite" "RazerLiteWallpaper") do (
     schtasks /End /TN %%T >nul 2>&1
     schtasks /Delete /F /TN %%T >nul 2>&1
 )
+taskkill /F /IM demonnapse.exe >nul 2>&1
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'demonnapse.py|razerlite.py|wallpaper.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 
 echo [2/3] Servizi Razer di nuovo automatici...
