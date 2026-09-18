@@ -1,9 +1,11 @@
 //! Convivenza con Synapse: capire se e' aperto, chiudere i processi Razer rimasti appesi,
 //! fermare e riavviare i servizi Razer (solo da amministratore).
 
+use std::sync::Mutex;
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::Services::{
     CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QueryServiceStatus, StartServiceW, SC_MANAGER_CONNECT,
     SERVICE_CONTROL_STOP, SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_STATUS, SERVICE_STOP,
@@ -49,8 +51,23 @@ pub fn is_admin() -> bool {
     unsafe { IsUserAnAdmin() }.as_bool()
 }
 
+/// Synapse e' aperto? Chiamata spesso: l'elenco completo dei processi (qualche ms) viene riletto
+/// solo quando compare un pid nuovo, altrimenti basta l'elenco dei pid.
 pub fn running() -> bool {
-    !processes(SYNAPSE_EXES).is_empty()
+    static SEEN: Mutex<(Vec<u32>, Vec<u32>)> = Mutex::new((Vec::new(), Vec::new())); // pid gia' visti, pid di Synapse
+    let mut pids = vec![0u32; 4096];
+    let mut bytes = 0;
+    if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) }.is_err() {
+        return !processes(SYNAPSE_EXES).is_empty();
+    }
+    pids.truncate(bytes as usize / 4);
+    let mut seen = SEEN.lock().unwrap();
+    if pids.iter().any(|p| !seen.0.contains(p)) {
+        seen.1 = processes(SYNAPSE_EXES).into_iter().map(|(pid, _)| pid).collect();
+    }
+    seen.1.retain(|p| pids.contains(p));
+    seen.0 = pids;
+    !seen.1.is_empty()
 }
 
 pub fn kill(names: &[&str]) {

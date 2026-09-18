@@ -1,6 +1,8 @@
-//! DemonNapse - lightweight companion daemon for Razer Synapse (port in Rust, in corso).
+//! DemonNapse - lightweight companion daemon for Razer Synapse.
 //!
-//! Per ora solo gli strumenti per verificare il port pezzo per pezzo:
+//!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
+//!
+//! Strumenti per verificare il port da Python pezzo per pezzo:
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
@@ -8,10 +10,13 @@
 //!   demonnapse synapse [--kill NOME.exe]                                      Synapse aperto? admin? stato dei servizi Razer
 //!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
 
+#![windows_subsystem = "windows"]
+
 #[macro_use]
 mod log;
 mod audio;
 mod config;
+mod daemon;
 mod effect;
 mod extract;
 mod layers;
@@ -24,6 +29,7 @@ use effect::Effect;
 use layers::Canvas;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
 /// Cartella con config.json e i file estratti: accanto all'eseguibile, altrimenti quella corrente.
 fn home() -> PathBuf {
@@ -137,7 +143,9 @@ fn synapse(args: &[String]) -> Result<(), String> {
         synapse::kill(&[name.to_lowercase().as_str()]); // per provare la chiusura su un processo innocuo
         return Ok(());
     }
-    println!("synapse aperto: {}", synapse::running());
+    let t = std::time::Instant::now();
+    let open = (0..20).fold(false, |_, _| synapse::running());
+    println!("synapse aperto: {open} (controllo in {:.2} ms)", t.elapsed().as_secs_f64() * 50.0);
     println!("amministratore: {}", synapse::is_admin());
     for (name, state) in synapse::service_states() {
         let state = match state {
@@ -152,15 +160,24 @@ fn synapse(args: &[String]) -> Result<(), String> {
 }
 
 fn main() {
+    // senza finestra propria: se mi lancia un terminale scrivo nel suo
+    let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
+        None | Some("-v") => {
+            log::init(&home().join("demonnapse.log"), !args.is_empty());
+            // con panic=abort non resta traccia: il motivo va nel log
+            std::panic::set_hook(Box::new(|p| info!("errore fatale: {p}")));
+            daemon::run(&home());
+            Ok(())
+        }
         Some("render") => render(&args[1..]),
         Some("probe") => probe(),
         Some("extract") => extract(&args[1..]),
         Some("profiles") => profiles(),
         Some("audio") => audio(&args[1..]),
         Some("synapse") => synapse(&args[1..]),
-        _ => Err("comandi: render, probe, extract, profiles, audio, synapse (il demone vero arriva nei prossimi passi del port)".into()),
+        _ => Err("comandi: (nessuno = demone), render, probe, extract, profiles, audio, synapse".into()),
     };
     if let Err(e) = result {
         eprintln!("errore: {e}");

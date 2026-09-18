@@ -6,13 +6,14 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE};
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
 static FILE: Mutex<Option<File>> = Mutex::new(None);
 pub static VERBOSE: AtomicBool = AtomicBool::new(false);
 
 /// Da qui in poi il log va in coda a questo file invece che su stderr.
-pub fn to_file(path: &Path) {
+fn to_file(path: &Path) {
     if let Ok(f) = File::options().create(true).append(true).open(path) {
         *FILE.lock().unwrap() = Some(f);
     }
@@ -39,7 +40,11 @@ macro_rules! debug {
     };
 }
 
-#[allow(dead_code)]
-pub fn set_verbose(on: bool) {
-    VERBOSE.store(on, Ordering::Relaxed);
+/// Log del demone: su stderr se c'e' (lanciato da un terminale), altrimenti in coda a `file`.
+pub fn init(file: &Path, verbose: bool) {
+    VERBOSE.store(verbose, Ordering::Relaxed);
+    let has_stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) }.is_ok_and(|h| !h.is_invalid() && !h.0.is_null());
+    if !has_stderr {
+        to_file(file);
+    }
 }
