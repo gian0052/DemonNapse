@@ -13,3 +13,5 @@ archivio/
 # python
 __pycache__/
 *.pyc
+# rust
+target/
