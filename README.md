@@ -13,6 +13,24 @@ with Synapse and all Razer services shut down.
 > Independent project, **not affiliated with or endorsed by Razer Inc.** Razer, Synapse and
 > Chroma are trademarks of Razer Inc.
 
+## What nobody else does
+
+DemonNapse is a **companion to Synapse, not another replacement for it**. As far as I could
+find (September 2026), no other project does these three things:
+
+1. **Synapse stays your editor.** Every alternative replaces Synapse with its own UI or config
+   file, so you rebuild your lighting from scratch with whatever effects it offers. Here you
+   keep designing in Chroma Studio, and the daemon imports the effects by reading Synapse's
+   own log files. Nothing to redo, nothing new to learn.
+2. **A Chroma Studio effect per on-board profile, with Synapse closed.** The mouse memory
+   stores keys and DPI, never lighting, so any per-profile lighting Razer offers (Linked
+   Games, "switch lighting when profile is switched") only works while Synapse is running.
+   People have been [asking for this for years](https://insider.razer.com/razer-chroma-rgb-21/different-lighting-for-each-profile-50709).
+   The daemon detects the profile button under the mouse and switches effect by itself.
+3. **Automatic hand-over.** Open Synapse and the daemon starts the Razer services, releases
+   the mouse and waits. Close Synapse and it re-imports your changes, stops the services and
+   takes the mouse back. You never touch a terminal or a config file.
+
 ## Why
 
 Synapse 4 cannot bind a Chroma Studio effect to an on-board profile (confirmed by Razer
@@ -24,6 +42,24 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 | RAM (as shown by Task Manager) | ~650 MB + 168 MB | ~6–27 MB |
 | CPU (audio-reactive effect) | — | ~0.4 % of one core |
 | Chroma Studio effect per on-board profile | no | yes |
+
+## How it compares
+
+Other people noticed how heavy Synapse is, and their projects are good at things DemonNapse
+does not try to do. Pick the one that matches what you want:
+
+| Project | What it is | Imports your Synapse / Chroma Studio setup | Effect per on-board profile | Devices |
+|---|---|---|---|---|
+| [OpenRGB](https://openrgb.org) | Vendor-neutral RGB control, all brands, all OSes | no | no | hundreds, all brands |
+| [openrazer-win](https://github.com/Ar4ikov/openrazer-win) | Windows port of OpenRazer: daemon, CLI and Python library | no | no | 260+ Razer devices |
+| [opsrzr](https://github.com/atv57/opsrzr) | Tray app: preset RGB, DPI, polling rate, battery | no | no | a few Razer devices |
+| [razer-win-cli](https://github.com/FriskIsGit/razer-win-cli) | One-shot CLI, no daemon | no | no | a few Razer devices |
+| [synapsekiller](https://github.com/nxroot/synapsekiller) | Starts Synapse, then kills its services after a delay | keeps what Synapse applied | no (no lighting engine) | any |
+| **DemonNapse** | Synapse companion daemon | **yes, from Synapse's logs** | **yes** | one mouse verified |
+
+If you want to get rid of Synapse entirely, or you own many devices, use OpenRGB or
+openrazer-win: their device support is far beyond this project. DemonNapse is for people who
+like Chroma Studio and only want it to stop running all day.
 
 ## How it works
 
