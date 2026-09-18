@@ -4,10 +4,12 @@
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
+//!   demonnapse audio [secondi]                                               picco dell'uscita audio, 10 letture al secondo
 //!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
 
 #[macro_use]
 mod log;
+mod audio;
 mod config;
 mod effect;
 mod extract;
@@ -118,6 +120,16 @@ fn profiles() -> Result<(), String> {
     Ok(())
 }
 
+fn audio(args: &[String]) -> Result<(), String> {
+    let seconds: f64 = args.first().map_or(Ok(3.0), |s| s.parse()).map_err(|_| "secondi")?;
+    let mut meter = audio::PeakMeter::new();
+    for _ in 0..(seconds * 10.0) as usize {
+        println!("{:.4}", meter.peak());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
@@ -125,7 +137,8 @@ fn main() {
         Some("probe") => probe(),
         Some("extract") => extract(&args[1..]),
         Some("profiles") => profiles(),
-        _ => Err("comandi: render, probe, extract, profiles (il demone vero arriva nei prossimi passi del port)".into()),
+        Some("audio") => audio(&args[1..]),
+        _ => Err("comandi: render, probe, extract, profiles, audio (il demone vero arriva nei prossimi passi del port)".into()),
     };
     if let Err(e) = result {
         eprintln!("errore: {e}");
