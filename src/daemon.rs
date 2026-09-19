@@ -138,7 +138,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         }
         let fx = &mut current.effect;
 
-        if fx.needs_clicks() && fx.idle(t) {
+        if fx.needs_clicks() {
             for (n, &vk) in VK_BUTTONS.iter().enumerate() {
                 let down = unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
                 if down && !pressed[n] {

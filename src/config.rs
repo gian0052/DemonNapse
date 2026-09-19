@@ -1,4 +1,4 @@
-//! config.json: mouse da usare, griglia di Chroma Studio e taratura dell'Audio Meter.
+//! config.json: mouse da usare, griglia di Chroma Studio e guadagno dell'Audio Meter.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -20,12 +20,8 @@ pub struct Config {
     pub skip_slots: Vec<u8>,
     #[serde(default = "default_fps")]
     pub fps: f64,
-    #[serde(default = "default_floor")]
-    pub audio_silence_floor: f64,
     #[serde(default = "default_gain")]
     pub audio_gain: f64,
-    #[serde(default = "default_idle")]
-    pub audio_idle_delay: f64,
 }
 
 fn default_skip() -> Vec<u8> {
@@ -34,14 +30,8 @@ fn default_skip() -> Vec<u8> {
 fn default_fps() -> f64 {
     60.0
 }
-fn default_floor() -> f64 {
-    0.02
-}
 fn default_gain() -> f64 {
     1.0
-}
-fn default_idle() -> f64 {
-    3.0
 }
 
 impl Config {

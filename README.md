@@ -88,15 +88,16 @@ like Chroma Studio and only want it to stop running all day.
 Supported layers: **Static**, **Spectrum Cycling**, **Wave**, **Wheel**, **Tidal**, **Ripple**,
 **Starlight**, **Breathing**, **Fire**, **Audio Meter** (system output peak via
 `IAudioMeterInformation`, no audio capture) and **Reactive** (mouse button flash), stacked in
-the same order as in Chroma Studio. When an effect has an Audio Meter, it has priority: the
-other layers only show after `audio_idle_delay` seconds of silence. Playback options are honoured
+the same order as in Chroma Studio. Like Razer's engine, the Audio Meter paints its whole region
+with one colour of the gradient (position = output peak × boost, auto boost included) and lets
+the layers below show through when the level falls back to zero. Playback options are honoured
 (start on a click, stop after N cycles or on the next click), and so are layer groups. Wheel and
 Tidal use the center point you set in Chroma Studio. Not supported yet: **Ambient Awareness** (it
 needs screen capture) and **Chroma Generate** (AI/pattern generator).
 
-Razer does not document what "speed 15" or "width 100" mean, so timings are calibrated by eye
-(constants at the top of `src/layers.rs`). To compare an effect with Synapse without assigning
-it to a profile: `python tools/preview.py "Chroma Effect X" 30` (it uses the Python renderer).
+Razer does not document what "speed 15" or "width 100" mean: timings, shapes and the Audio
+Meter were measured on the Chroma Studio preview, which shows the frames of Razer's own engine
+(constants and notes at the top of `src/layers.rs` and `src/effect.rs`).
 
 ## Requirements
 
@@ -136,7 +137,7 @@ To go back exactly to how things were: `uninstall.cmd` as administrator.
 | `device.chroma_grid` | Chroma Studio grid position `"row,col"` → physical LED index |
 | `effect_overrides` | `{"Profile name": "Chroma Effect X"}` when names have nothing in common |
 | `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
-| `audio_gain`, `audio_silence_floor`, `audio_idle_delay` | Audio Meter tuning |
+| `audio_gain` | multiplies the output peak before the Audio Meter (default 1, same as Razer) |
 
 ## Supported devices
 
