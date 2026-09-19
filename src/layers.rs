@@ -165,6 +165,12 @@ impl Canvas {
         canvas
     }
 
+    /// Riga e colonna della griglia di Chroma Studio del LED `i`.
+    pub fn cell(&self, i: usize) -> (i64, i64) {
+        let (x, y) = self.pos[i];
+        ((y / CELL).round() as i64, (x / CELL).round() as i64)
+    }
+
     /// Posizione del LED rispetto a `center` con ogni asse diviso per la sua estensione in
     /// `size`: il motore normalizza righe e colonne separatamente (misurato: a 45 gradi un'onda
     /// avanza di 1/5 * 0,71 per colonna e 1/7 * 0,71 per riga su una regione di 5x7 celle).

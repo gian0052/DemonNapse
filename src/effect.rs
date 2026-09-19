@@ -1,9 +1,11 @@
 //! Un effetto di Chroma Studio pronto da disegnare: i layer di `layers.rs` e gli Audio Meter
 //! impilati come in Chroma Studio, e i lampi Reactive sopra a tutto.
 
+use crate::ambient::{self, Ambient};
 use crate::config::Config;
 use crate::layers::{gradient, lerp, rgb, stops, Canvas, Layer, Rgb, Rng, Stops, BLACK};
 use serde_json::Value;
+use crate::screen::Screen;
 use std::collections::HashMap;
 
 const REACTIVE_RANDOM: [u32; 6] = [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF];
@@ -77,6 +79,7 @@ struct Audio {
 enum Item {
     Layer(Layer),
     Audio(Audio),
+    Ambient(Ambient),
 }
 
 /// I layer nell'ordine di Chroma Studio, con quelli dentro i gruppi (`type: "group"`) al posto
@@ -114,6 +117,8 @@ pub struct Effect {
     flashes: Vec<Flash>,
     gain: f64,
     rng: Rng,
+    screen: Option<Screen>, // aperto solo se l'effetto ha un Ambient
+    next_capture: f64,
 }
 
 impl Effect {
@@ -128,6 +133,8 @@ impl Effect {
             flashes: Vec::new(),
             gain: cfg.audio_gain,
             rng: Rng::new(seed),
+            screen: None,
+            next_capture: 0.0,
         };
         let mut unsupported = Vec::new();
         let empty = Value::Object(Default::default());
@@ -160,6 +167,7 @@ impl Effect {
                             fx.stack.push(Item::Audio(Audio { leds, stops: st, boost: num("boost", 1.0), auto, decay: num("decay", 1.0), level: 0.0 }));
                         }
                     }
+                    "ambient" => fx.stack.push(Item::Ambient(Ambient::new(leds, p, canvas))),
                     "reactive" => {
                         let random = p.get("randomColor").and_then(Value::as_bool).unwrap_or(false);
                         let color = p.get("color").and_then(Value::as_u64).unwrap_or(0x00FF00) as u32;
@@ -196,6 +204,12 @@ impl Effect {
         self.flashes.clear();
     }
 
+    /// L'effetto non e' piu' quello attivo: chiudo la lettura dello schermo (Ambient).
+    pub fn sleep(&mut self) {
+        self.screen = None;
+        self.next_capture = 0.0;
+    }
+
     pub fn on_click(&mut self, now: f64) {
         for item in self.stack.iter_mut() {
             if let Item::Layer(l) = item {
@@ -210,13 +224,39 @@ impl Effect {
         }
     }
 
+    /// Ambient: legge lo schermo ogni 40 ms come il motore di Razer. Senza Ambient non apre nulla.
+    fn capture(&mut self, now: f64) {
+        if now < self.next_capture || !self.stack.iter().any(|i| matches!(i, Item::Ambient(a) if a.points(1, 1).is_some())) {
+            return;
+        }
+        self.next_capture = if now - self.next_capture > ambient::TICK { now + ambient::TICK } else { self.next_capture + ambient::TICK };
+        if self.screen.is_none() {
+            self.screen = Screen::open();
+        }
+        let Some(screen) = self.screen.as_mut() else { return };
+        let (w, h) = screen.size();
+        let requests: Vec<_> = self.stack.iter().filter_map(|i| if let Item::Ambient(a) = i { a.points(w, h) } else { None }).collect();
+        // None = schermo invariato: i colori restano quelli di prima
+        let Some(samples) = screen.capture(&requests) else { return };
+        let mut it = samples.iter();
+        for item in self.stack.iter_mut() {
+            if let Item::Ambient(a) = item {
+                if a.points(w, h).is_some() {
+                    a.update(it.next().expect("una lettura per ogni Ambient"));
+                }
+            }
+        }
+    }
+
     /// `peak`: picco dell'uscita audio (0..1), letto dal chiamante solo se `has_audio()`.
     pub fn render(&mut self, now: f64, dt: f64, peak: f64) -> Vec<Rgb> {
+        self.capture(now);
         let mut frame = vec![BLACK; self.num_leds];
         let peak = peak * self.gain;
         for item in self.stack.iter_mut() {
             match item {
                 Item::Layer(l) => l.paint(now, &mut frame, &mut self.rng),
+                Item::Ambient(a) => a.paint(&mut frame),
                 Item::Audio(a) => {
                     let boost = match &mut a.auto {
                         Some(auto) => auto.feed(now, peak),

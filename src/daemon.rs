@@ -130,6 +130,13 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         if t - tracker.last_poll > 30.0 {
             changed |= tracker.refresh(&ctl, t); // rete di sicurezza se un evento si perde
         }
+        if changed {
+            for (k, a) in active.iter_mut().enumerate() {
+                if k != tracker.idx {
+                    a.effect.sleep();
+                }
+            }
+        }
         let current = &mut active[tracker.idx];
         if changed {
             current.effect.clear_flashes();

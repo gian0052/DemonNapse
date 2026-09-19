@@ -1,12 +1,12 @@
 # DemonNapse
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/rust-single%20450%20KB%20exe-orange)
+![Rust](https://img.shields.io/badge/rust-single%20480%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
 Lightweight replacement for Razer Synapse's RGB engine on Windows. Keep designing your
-profiles and Chroma Studio effects in Synapse, close it, and a 450 KB Rust daemon using
+profiles and Chroma Studio effects in Synapse, close it, and a 480 KB Rust daemon using
 under 2 MB of private memory takes over: one RGB effect per on-board profile, switched with the profile button under the mouse,
 with Synapse and all Razer services shut down.
 
@@ -92,12 +92,17 @@ the same order as in Chroma Studio. Like Razer's engine, the Audio Meter paints 
 with one colour of the gradient (position = output peak × boost, auto boost included) and lets
 the layers below show through when the level falls back to zero. Playback options are honoured
 (start on a click, stop after N cycles or on the next click), and so are layer groups. Wheel and
-Tidal use the center point you set in Chroma Studio. Not supported yet: **Ambient Awareness** (it
-needs screen capture) and **Chroma Generate** (AI/pattern generator).
+Tidal use the center point you set in Chroma Studio. **Ambient Awareness** reads the colours of
+the primary screen like Razer's engine (one pixel per grid cell of the region, the chosen screen
+area, the same blur, every 40 ms) through DXGI Desktop Duplication, and only while the active
+effect has an Ambient layer: then the daemon uses about 55 MB more private memory (the GPU
+driver) and ~0.3 % more of one core; with any other effect nothing is opened and the cost is zero.
+**Chroma Generate** (AI/pattern generator from images and videos) is not supported and will not
+be: it is the opposite of lightweight.
 
 Razer does not document what "speed 15" or "width 100" mean: timings, shapes and the Audio
 Meter were measured on the Chroma Studio preview, which shows the frames of Razer's own engine
-(constants and notes at the top of `src/layers.rs` and `src/effect.rs`).
+(constants and notes at the top of `src/layers.rs`, `src/effect.rs` and `src/ambient.rs`).
 
 ## Requirements
 
@@ -125,7 +130,7 @@ HID event logged: stop the task (`schtasks /End /TN DemonNapse`), then `demonnap
 
 Other commands, used to check the daemon piece by piece: `probe` (firmware, active slot, device
 mode), `profiles` (profile → effect), `audio` (output peak), `synapse` (is Synapse open, state
-of the Razer services), `render` (frames of an effect as hex).
+of the Razer services), `render` (frames of an effect as hex; `--live` renders in real time, for Ambient).
 
 To go back exactly to how things were: `uninstall.cmd` as administrator.
 
@@ -154,10 +159,11 @@ your mouse sends when you press the profile button. Reports and pull requests we
   short) if that worries you.
 - It depends on the **format of Synapse 4's log files**, which Razer can change at any time.
   If an update breaks extraction, the daemon keeps the last known effects.
-- It uses only user-mode APIs (`hidapi` feature reports, `GetAsyncKeyState`, WASAPI meter),
+- It uses only user-mode APIs (`hidapi` feature reports, `GetAsyncKeyState`, WASAPI meter,
+  DXGI Desktop Duplication for Ambient),
   the same approach as OpenRGB/OpenRazer. Not tested against anti-cheat systems.
-- Every Chroma Studio layer is imported; all of them are rendered except Ambient Awareness,
-  which is ignored with a warning. Speeds and widths may differ slightly from Synapse.
+- Every Chroma Studio layer is imported; all of them are rendered except Chroma Generate,
+  which is ignored with a warning.
 
 ## Acknowledgements
 

@@ -14,6 +14,7 @@
 
 #[macro_use]
 mod log;
+mod ambient;
 mod audio;
 mod config;
 mod daemon;
@@ -22,6 +23,7 @@ mod extract;
 mod layers;
 mod profiles;
 mod razerhid;
+mod screen;
 mod synapse;
 
 use config::Config;
@@ -49,7 +51,7 @@ fn render(args: &[String]) -> Result<(), String> {
     let only = args.iter().position(|a| a == "--layer").and_then(|i| args.get(i + 1)).cloned();
     let pos: Vec<&String> = pos.into_iter().filter(|a| Some(*a) != only.as_ref()).collect();
     let [title, t0, frames, fps] = pos[..] else {
-        return Err("uso: render \"<effetto>\" <t0> <frame> <fps> [--layer NOME] [--all]".into());
+        return Err("uso: render \"<effetto>\" <t0> <frame> <fps> [--layer NOME] [--all] [--live]".into());
     };
     let (t0, frames, fps): (f64, usize, f64) =
         (t0.parse().map_err(|_| "t0")?, frames.parse().map_err(|_| "frame")?, fps.parse().map_err(|_| "fps")?);
@@ -83,7 +85,14 @@ fn render(args: &[String]) -> Result<(), String> {
     for name in unsupported {
         eprintln!("layer '{name}' non supportato, ignorato");
     }
+    // --live: in tempo reale, un frame ogni 1/fps s (per l'Ambient, che legge lo schermo)
+    let live = args.iter().any(|a| a == "--live");
+    let start = std::time::Instant::now();
     for n in 0..frames {
+        if live {
+            let due = std::time::Duration::from_secs_f64(n as f64 / fps);
+            std::thread::sleep(due.saturating_sub(start.elapsed()));
+        }
         let frame = fx.render(t0 + n as f64 / fps, 1.0 / fps, 0.0);
         let hex: Vec<String> = frame.iter().map(|c| format!("{:02X}{:02X}{:02X}", c.0, c.1, c.2)).collect();
         println!("{}", hex.join(" "));
