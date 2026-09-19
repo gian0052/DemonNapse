@@ -3,7 +3,8 @@ Uso: python extract_effects.py   ->  scrive chroma_effects_dump.json e stampa un
 import glob, json, os, re
 
 LOGS = os.path.expandvars(r"%LOCALAPPDATA%\Razer\RazerAppEngine\User Data\Logs")
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_effects_dump.json")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # la radice del repo
+OUT = os.path.join(ROOT, "chroma_effects_dump.json")
 
 
 def extract(verbose=True):
@@ -42,7 +43,7 @@ def extract(verbose=True):
 
 
 
-PROFILES_OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "synapse_profiles.json")
+PROFILES_OUT = os.path.join(ROOT, "synapse_profiles.json")
 
 
 def extract_profiles(verbose=True):

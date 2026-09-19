@@ -13,7 +13,7 @@ import logging
 import tempfile
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "python"))
 logging.basicConfig(level=logging.ERROR)
 import demonnapse as d
 import extract_effects as ex

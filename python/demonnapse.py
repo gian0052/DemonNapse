@@ -24,7 +24,7 @@ import chroma_layers as cl
 import razerhid as rz
 from chroma_layers import BLACK, gradient, lerp, rgb
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # la radice del repo: config.json e i file estratti
 log = logging.getLogger("demonnapse")
 logging.getLogger("comtypes").setLevel(logging.WARNING)
 
