@@ -5,8 +5,9 @@
 //! dai click.
 //!
 //! La forma di ogni effetto segue il modo in cui Chroma Studio lo descrive al suo motore
-//! (gradiente, durata, larghezza, velocita', densita'). Le unita' di "speed" invece non sono
-//! documentate: le costanti qui sotto sono stime.
+//! (gradiente, durata, larghezza, velocita', densita'). Le velocita' di wave, tidal e wheel sono
+//! misurate sull'anteprima di Chroma Studio (frame del motore di Razer, 2026-09-19); quelle di
+//! ripple e starlight restano stime.
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -20,8 +21,13 @@ const DEV_W: f64 = 200.0; // tela del dispositivo in Chroma Studio (px)
 const DEV_H: f64 = 320.0;
 const CELL: f64 = 40.0; // lato di una cella della griglia dei LED sulla tela dell'editor (px)
 
-const WAVE_HZ: f64 = 1.0 / 35.0; // cicli al secondo per unita' di "speed" (wave e tidal)
-const WHEEL_DEG_S: f64 = 2.0; // gradi al secondo per unita' di "speed"
+// Misurati: il wave avanza a scatti di 40 ms e con larghezza 100% un LED ripete il gradiente ogni
+// floor(625 / speed) scatti (speed 10 -> 2,48 s, 15 -> 1,64 s, 25 -> 1,00 s, 50 -> 0,48 s); il
+// periodo cresce in proporzione alla larghezza e non dipende da angolo e split.
+const WAVE_TICK: f64 = 0.04;
+const WAVE_TICKS: f64 = 625.0;
+const TIDAL_PERIOD: f64 = 50.0; // s * speed: tidal a speed 15 -> 3,33 s (misurato)
+// wheel: "speed" = gradi al secondo (speed 60 -> un giro in 6 s, 120 -> 3 s, misurato)
 const RIPPLE_PX_S: f64 = 30.0; // px al secondo per unita' di "speed"
 const RIPPLE_EVERY: (f64, f64) = (0.8, 2.5); // s tra due onde quando playbackStart = "random"
 const STAR_MAX_DENSITY: f64 = 10.0; // "density" 10 = tutti i LED della regione accesi insieme
@@ -87,14 +93,28 @@ impl Canvas {
     }
 
     /// Distanza con segno del LED dalla retta che passa per `center` perpendicolare a `angle`,
-    /// in frazioni della tela (-0.5..0.5 se il centro e' quello della tela). Gradi come su una
-    /// bussola: 0 = verso l'alto, 90 = verso destra (il wave di default di Chroma Studio).
-    fn along(&self, i: usize, angle: f64, center: (f64, f64)) -> f64 {
+    /// in frazioni dell'estensione `size` lungo `angle` (-0.5..0.5 dentro il riquadro). Gradi come
+    /// su una bussola: 0 = verso l'alto, 90 = verso destra (il wave di default di Chroma Studio).
+    fn along(&self, i: usize, angle: f64, center: (f64, f64), size: (f64, f64)) -> f64 {
         let a = angle.to_radians();
         let (dx, dy) = (a.sin(), -a.cos());
         let (x, y) = self.pos[i];
-        let span = (DEV_W * dx).abs() + (DEV_H * dy).abs();
+        let span = (size.0 * dx).abs() + (size.1 * dy).abs();
         ((x - center.0) * dx + (y - center.1) * dy) / span
+    }
+
+    /// Riquadro delle celle dei LED di una regione: centro e dimensioni (px). Il motore di Razer
+    /// stende l'onda sulla regione, non su tutto il mouse: con larghezza 100% un'onda copre le
+    /// righe della regione (misurato: regione di 3 righe -> 1/3 di periodo per riga, di 4 -> 1/4).
+    fn region(&self, leds: &[usize]) -> ((f64, f64), (f64, f64)) {
+        if leds.is_empty() {
+            return ((DEV_W / 2.0, DEV_H / 2.0), (DEV_W, DEV_H));
+        }
+        let (xs, ys): (Vec<f64>, Vec<f64>) = leds.iter().map(|&i| self.pos[i]).unzip();
+        let lo = |v: &[f64]| v.iter().cloned().fold(f64::INFINITY, f64::min) - CELL / 2.0;
+        let hi = |v: &[f64]| v.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + CELL / 2.0;
+        let (x0, x1, y0, y1) = (lo(&xs), hi(&xs), lo(&ys), hi(&ys));
+        (((x0 + x1) / 2.0, (y0 + y1) / 2.0), (x1 - x0, y1 - y0))
     }
 }
 
@@ -144,7 +164,9 @@ enum Kind {
     /// Tutta la regione dello stesso colore, un giro del gradiente ogni `period` s.
     Spectrum { stops: Stops, period: f64 },
     /// Wave, Tidal e Wheel: il gradiente scorre, `phase` e' la posizione di ogni LED della regione.
-    Scroll { stops: Stops, phase: Vec<f64>, hz: f64 },
+    /// `pause`: cicli di buio dopo ogni passaggio (wave). `clear_black`: il nero lascia vedere i
+    /// layer sotto (tidal, misurato).
+    Scroll { stops: Stops, phase: Vec<f64>, hz: f64, pause: f64, clear_black: bool },
     /// Anelli che si allargano da un punto: a caso, oppure a ogni click se onPress.
     Ripple { stops: Stops, speed: f64, thick: f64, rings: Vec<(f64, f64, f64)>, next: f64, all: Vec<(f64, f64)>, at: Vec<(f64, f64)> },
     /// Stelle che nascono a caso: il gradiente e' la vita di una stella, `max` quante insieme.
@@ -202,8 +224,17 @@ impl Layer {
                 let tidal = name == "tidal";
                 let angle = num(p, "angle", if tidal { 160.0 } else { 90.0 });
                 let split = p.get("split").and_then(Value::as_bool).unwrap_or(tidal);
-                let center = if tidal { center_point(lp) } else { (DEV_W / 2.0, DEV_H / 2.0) };
-                let length = num(p, "width", 100.0).max(1.0) / 100.0; // lunghezze d'onda per tela
+                let (middle, size) = canvas.region(&leds);
+                let center = if tidal { center_point(lp) } else { middle };
+                let length = num(p, "width", 100.0).max(1.0) / 100.0; // lunghezze d'onda per regione
+                let speed = num(p, "speed", if tidal { 10.0 } else { 15.0 });
+                let period = match (tidal, speed > 0.0) {
+                    (_, false) => f64::INFINITY,
+                    (true, true) => TIDAL_PERIOD / speed * length,
+                    (false, true) => (WAVE_TICKS / speed).floor().max(1.0) * WAVE_TICK * length,
+                };
+                let hz = 1.0 / period;
+                let pause = if tidal { 0.0 } else { num(p, "pause", 0.0).max(0.0) / 1000.0 * hz }; // ms -> cicli
                 // `counterclockwise` booleano nella regione (effetti rapidi del mouse) = onda che gira in tondo
                 let spin = p.get("counterclockwise").and_then(Value::as_bool).map(|ccw| if ccw { -1.0 } else { 1.0 });
                 let back = flag(lp, "counterclockwise") && spin.is_none(); // verso di marcia invertito
@@ -214,20 +245,20 @@ impl Layer {
                             let (x, y) = canvas.pos[i];
                             (y - DEV_H / 2.0).atan2(x - DEV_W / 2.0) / TAU * dir
                         } else {
-                            let d = canvas.along(i, angle, center);
+                            let d = canvas.along(i, angle, center, size);
                             let pos = if split { d.abs() * 2.0 } else { d + 0.5 };
                             if back { -pos } else { pos }
                         };
                         pos / length
                     })
                     .collect();
-                Kind::Scroll { stops: st, phase, hz: num(p, "speed", if tidal { 10.0 } else { 15.0 }) * WAVE_HZ }
+                Kind::Scroll { stops: st, phase, hz, pause, clear_black: tidal }
             }
             "wheel" => {
                 let (cx, cy) = center_point(lp);
                 let dir = if flag(lp, "counterclockwise") { -1.0 } else { 1.0 };
                 let phase = leds.iter().map(|&i| (canvas.pos[i].1 - cy).atan2(canvas.pos[i].0 - cx) / TAU).collect();
-                Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) * WHEEL_DEG_S / 360.0 * dir }
+                Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) / 360.0 * dir, pause: 0.0, clear_black: false }
             }
             "ripple" => {
                 running = true;
@@ -299,7 +330,7 @@ impl Layer {
     /// Durata di un ciclo, per fermare gli effetti partiti con un click dopo N cicli.
     fn cycle(&self) -> Option<f64> {
         match &self.kind {
-            Kind::Scroll { hz, .. } if *hz != 0.0 => Some(1.0 / hz.abs()),
+            Kind::Scroll { hz, pause, .. } if *hz != 0.0 => Some((1.0 + pause) / hz.abs()),
             Kind::Breathing { period, .. } => Some(*period),
             _ => None,
         }
@@ -322,7 +353,13 @@ impl Layer {
             let out: Option<(Rgb, f64)> = match &mut self.kind {
                 Kind::Static(c) => c.map(|c| (c, 1.0)),
                 Kind::Spectrum { stops, period } => Some((gradient(stops, now.rem_euclid(*period) / *period), 1.0)),
-                Kind::Scroll { stops, phase, hz } => Some((gradient(stops, (phase[n] - t * *hz).rem_euclid(1.0)), 1.0)),
+                Kind::Scroll { stops, phase, hz, pause, clear_black } => {
+                    // u = quanta parte del gradiente e' gia' passata sul LED; con la pausa, dopo un
+                    // passaggio il LED resta spento per `pause` cicli
+                    let u = (t * *hz - phase[n]).rem_euclid(1.0 + *pause);
+                    let c = gradient(stops, (-u).rem_euclid(1.0));
+                    (u < 1.0 && !(*clear_black && c == BLACK)).then_some((c, 1.0))
+                }
                 Kind::Ripple { stops, speed, thick, rings, next, all, at } => {
                     if n == 0 {
                         if !on_press && now >= *next && !all.is_empty() {
@@ -427,14 +464,14 @@ mod tests {
     }
 
     fn wave(extra: Value) -> Value {
-        let mut p = json!({"speed": 35, "width": 100, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0xFF0000}]});
+        let mut p = json!({"speed": 25, "width": 100, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0xFF0000}]});
         p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         p
     }
 
     #[test]
     fn dopo_n_cicli_si_ferma() {
-        // speed 35 = un ciclo al secondo (stima WAVE_HZ); 2 cicli dal click a t=10
+        // speed 25 = un ciclo al secondo (misurato); 2 cicli dal click a t=10
         let mut l = layer("wave", wave(json!({"playbackStart": "onPress", "playbackEnd": "after", "cycles": 2})), json!({}));
         assert!(!lit(&mut l, 5.0), "prima del click non si vede");
         l.press(10.0);
@@ -485,6 +522,56 @@ mod tests {
         assert_eq!(period(json!({"duration": 14000})), 14.0);
         assert_eq!(period(json!({"duration": 14000, "randomColor": true})), 7.0);
         assert_eq!(period(json!({})), 14.0);
+    }
+
+    fn period(l: &Layer) -> f64 {
+        match &l.kind {
+            Kind::Scroll { hz, .. } => 1.0 / hz.abs(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn periodi_misurati_su_chroma_studio() {
+        let w = |speed: f64, width: f64| period(&layer("wave", wave(json!({"speed": speed, "width": width})), json!({})));
+        for (speed, width, measured) in [(10.0, 100.0, 2.48), (15.0, 100.0, 1.64), (30.0, 100.0, 0.80), (45.0, 100.0, 0.52), (50.0, 100.0, 0.48), (10.0, 200.0, 4.96), (10.0, 50.0, 1.24)] {
+            assert!((w(speed, width) - measured).abs() < 0.005, "wave {speed}/{width}: {} invece di {measured}", w(speed, width));
+        }
+        let tidal = layer("tidal", json!({"speed": 15, "color": 0xFF0000, "color2": 0xFF00FF}), json!({}));
+        assert!((period(&tidal) - 3.336).abs() < 0.01);
+        let wheel = layer("wheel", wave(json!({"speed": 60})), json!({}));
+        assert!((period(&wheel) - 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pausa_spegne_il_led_dopo_un_passaggio() {
+        // speed 25 = 1 s per passaggio, poi 2 s spento (misurato: 2,48 s + 2 s di pausa = 4,48 s)
+        let p = wave(json!({"pause": 2000}));
+        let mut l = Layer::new("wave", vec![0], &p, &json!({}), &canvas(), &mut Rng::new(1)).unwrap();
+        let lit_at: Vec<bool> = (0..30).map(|k| lit(&mut l, k as f64 * 0.1 + 0.05)).collect();
+        assert_eq!(lit_at.iter().filter(|&&x| x).count(), 10, "acceso 1 s ogni 3 s: {lit_at:?}");
+        assert!(lit(&mut l, 3.05) == lit(&mut l, 0.05));
+    }
+
+    #[test]
+    fn onda_stesa_sulla_regione() {
+        // 4 righe (3..6) in verticale: un'onda al 100% copre la regione, 1/4 di periodo per riga
+        let canvas = Canvas::new(&HashMap::from([((3, 0), 0), ((4, 0), 1), ((6, 0), 2)]), 3);
+        let p = wave(json!({"angle": 180}));
+        let l = Layer::new("wave", vec![0, 1, 2], &p, &json!({}), &canvas, &mut Rng::new(1)).unwrap();
+        let Kind::Scroll { phase, .. } = &l.kind else { unreachable!() };
+        assert!(((phase[1] - phase[0]) - 0.25).abs() < 1e-9 && ((phase[2] - phase[1]) - 0.5).abs() < 1e-9, "{phase:?}");
+    }
+
+    #[test]
+    fn il_nero_del_tidal_e_trasparente() {
+        let mut l = layer("tidal", json!({"speed": 15, "color": 0x00FF00, "color2": 0x0000FF}), json!({}));
+        let covered = (0..200).filter(|k| {
+            let mut frame = vec![(9, 9, 9); 2];
+            l.paint(*k as f64 * 0.02, &mut frame, &mut Rng::new(1));
+            frame[0] != (9, 9, 9)
+        }).count();
+        assert!(covered > 0 && covered < 200, "il tidal deve coprire solo a tratti: {covered}/200");
     }
 
     #[test]
