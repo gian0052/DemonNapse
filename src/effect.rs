@@ -1,5 +1,5 @@
-//! Un effetto di Chroma Studio pronto da disegnare: i layer di `layers.rs` e gli Audio Meter
-//! impilati come in Chroma Studio, e i lampi Reactive sopra a tutto.
+//! Un effetto di Chroma Studio pronto da disegnare: i layer di `layers.rs`, gli Audio Meter, gli
+//! Ambient e i Reactive impilati come in Chroma Studio (il primo della lista sta sopra).
 
 use crate::ambient::{self, Ambient};
 use crate::config::Config;
@@ -8,7 +8,12 @@ use serde_json::Value;
 use crate::screen::Screen;
 use std::collections::HashMap;
 
-const REACTIVE_RANDOM: [u32; 6] = [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF];
+// Reactive, misurato con click veri sull'anteprima di Chroma Studio (2026-09-19): il lampo parte
+// col click, pieno, e scende in linea retta verso il nero in (floor(duration / 40 ms) - 1) scatti
+// da 40 ms (1500 ms -> 1,44 s, 500 ms -> 0,44 s); mentre dura copre i layer sotto (anche mentre
+// si spegne: sotto non si vede niente), finito torna trasparente. Un click durante il lampo lo fa
+// ripartire da capo (anche con un colore nuovo). Colori a caso: ogni canale 0, 128 o 255, mai nero.
+const REACTIVE_TICK: f64 = 0.04;
 
 // Audio Meter, misurato sull'anteprima di Chroma Studio con toni a volume noto (2026-09-19):
 // tutti i LED della regione hanno lo stesso colore, quello del gradiente alla posizione
@@ -80,6 +85,7 @@ enum Item {
     Layer(Layer),
     Audio(Audio),
     Ambient(Ambient),
+    Reactive(Reactive),
 }
 
 /// I layer nell'ordine di Chroma Studio, con quelli dentro i gruppi (`type: "group"`) al posto
@@ -99,22 +105,14 @@ fn flatten<'a>(layers: &'a [Value], out: &mut Vec<&'a Value>) {
 struct Reactive {
     leds: Vec<usize>,
     color: Option<Rgb>, // None = colore a caso a ogni click
-    duration: f64,
-}
-
-struct Flash {
-    leds: Vec<usize>,
-    color: Rgb,
-    t0: f64,
-    duration: f64,
+    duration: f64,      // s, gia' ridotta agli scatti del motore
+    flash: Option<(Rgb, f64)>, // lampo in corso: colore e istante del click
 }
 
 pub struct Effect {
     pub title: String,
     num_leds: usize,
     stack: Vec<Item>, // dal basso verso l'alto
-    reactive: Vec<Reactive>,
-    flashes: Vec<Flash>,
     gain: f64,
     rng: Rng,
     screen: Option<Screen>, // aperto solo se l'effetto ha un Ambient
@@ -129,8 +127,6 @@ impl Effect {
             title: spec.get("title").and_then(Value::as_str).unwrap_or("(senza nome)").to_string(),
             num_leds: cfg.device.leds,
             stack: Vec::new(),
-            reactive: Vec::new(),
-            flashes: Vec::new(),
             gain: cfg.audio_gain,
             rng: Rng::new(seed),
             screen: None,
@@ -171,8 +167,10 @@ impl Effect {
                     "reactive" => {
                         let random = p.get("randomColor").and_then(Value::as_bool).unwrap_or(false);
                         let color = p.get("color").and_then(Value::as_u64).unwrap_or(0x00FF00) as u32;
-                        let duration = p.get("duration").and_then(Value::as_f64).unwrap_or(1500.0) / 1000.0;
-                        fx.reactive.push(Reactive { leds, color: if random { None } else { Some(rgb(color)) }, duration });
+                        let ms = p.get("duration").and_then(Value::as_f64).unwrap_or(1500.0);
+                        let duration = ((ms / 1000.0 / REACTIVE_TICK + 1e-9).floor() - 1.0).max(1.0) * REACTIVE_TICK;
+                        let color = if random { None } else { Some(rgb(color)) };
+                        fx.stack.push(Item::Reactive(Reactive { leds, color, duration, flash: None }));
                     }
                     _ => match Layer::new(name, leds, p, lp, canvas, &mut fx.rng) {
                         Some(l) => fx.stack.push(Item::Layer(l)),
@@ -197,11 +195,15 @@ impl Effect {
     }
 
     pub fn needs_clicks(&self) -> bool {
-        !self.reactive.is_empty() || self.stack.iter().any(|i| matches!(i, Item::Layer(l) if l.on_press))
+        self.stack.iter().any(|i| matches!(i, Item::Reactive(_)) || matches!(i, Item::Layer(l) if l.on_press))
     }
 
     pub fn clear_flashes(&mut self) {
-        self.flashes.clear();
+        for item in self.stack.iter_mut() {
+            if let Item::Reactive(r) = item {
+                r.flash = None;
+            }
+        }
     }
 
     /// L'effetto non e' piu' quello attivo: chiudo la lettura dello schermo (Ambient).
@@ -212,15 +214,11 @@ impl Effect {
 
     pub fn on_click(&mut self, now: f64) {
         for item in self.stack.iter_mut() {
-            if let Item::Layer(l) = item {
-                if l.on_press {
-                    l.press(now);
-                }
+            match item {
+                Item::Layer(l) if l.on_press => l.press(now),
+                Item::Reactive(r) => r.flash = Some((r.color.unwrap_or_else(|| self.rng.any_color()), now)),
+                _ => {}
             }
-        }
-        for r in &self.reactive {
-            let color = r.color.unwrap_or_else(|| rgb(REACTIVE_RANDOM[(self.rng.f64() * 6.0) as usize % 6]));
-            self.flashes.push(Flash { leds: r.leds.clone(), color, t0: now, duration: r.duration });
         }
     }
 
@@ -257,6 +255,19 @@ impl Effect {
             match item {
                 Item::Layer(l) => l.paint(now, &mut frame, &mut self.rng),
                 Item::Ambient(a) => a.paint(&mut frame),
+                Item::Reactive(r) => {
+                    if let Some((c, t0)) = r.flash {
+                        let k = 1.0 - (now - t0) / r.duration;
+                        if k > 0.0 {
+                            let c = lerp(BLACK, c, k.min(1.0));
+                            for &i in &r.leds {
+                                frame[i] = c;
+                            }
+                        } else {
+                            r.flash = None;
+                        }
+                    }
+                }
                 Item::Audio(a) => {
                     let boost = match &mut a.auto {
                         Some(auto) => auto.feed(now, peak),
@@ -272,14 +283,8 @@ impl Effect {
                 }
             }
         }
-        self.flashes.retain(|f| now - f.t0 < f.duration);
-        for f in &self.flashes {
-            let k = 1.0 - (now - f.t0) / f.duration;
-            for &i in &f.leds {
-                frame[i] = lerp(frame[i], f.color, k);
-            }
-        }
         frame
+
     }
 }
 
@@ -385,5 +390,48 @@ mod tests {
         play(&mut fx, &mut t, 0.2, 1.0);
         play(&mut fx, &mut t, 1.0, 1.0 / 60.0);
         assert!((play(&mut fx, &mut t, 0.2, 1.0) - 0.2 / 0.9).abs() < 1e-9);
+    }
+
+    fn reactive(params: Value) -> Value {
+        json!({"name": "reactive", "visible": true, "regions": region(params)})
+    }
+
+    #[test]
+    fn reactive_lampo_misurato() {
+        // 1500 ms -> 36 scatti da 40 ms: 255, 247, 240 ... 7, poi spento (misurato con click veri)
+        let mut fx = effect(json!({"layers": [reactive(json!({"color": 0xFF0000, "duration": 1500}))]}));
+        fx.on_click(1.0);
+        assert_eq!(fx.render(1.0, 0.0, 0.0)[0], (255, 0, 0));
+        assert_eq!(fx.render(1.04, 0.0, 0.0)[0].0, 247); // come Razer
+        assert_eq!(fx.render(2.44, 0.0, 0.0)[0], BLACK);
+        // un click durante il lampo lo fa ripartire da capo
+        fx.on_click(3.0);
+        fx.on_click(3.5);
+        assert_eq!(fx.render(3.5, 0.0, 0.0)[0], (255, 0, 0));
+    }
+
+    #[test]
+    fn reactive_rispetta_l_ordine_dei_layer() {
+        let blue = json!({"name": "static", "visible": true, "regions": region(json!({"color": 0x0000FF}))});
+        let red = reactive(json!({"color": 0xFF0000, "duration": 1500}));
+        // reactive sopra: mentre si spegne copre lo statico (misurato: 226,0,0 e niente blu)
+        let mut fx = effect(json!({"layers": [red.clone(), blue.clone()]}));
+        fx.on_click(0.0);
+        assert_eq!(fx.render(0.72, 0.0, 0.0)[0], (127, 0, 0));
+        assert_eq!(fx.render(1.5, 0.0, 0.0)[0], (0, 0, 255), "finito il lampo torna lo statico");
+        // reactive sotto uno statico: non si vede
+        let mut fx = effect(json!({"layers": [blue, red]}));
+        fx.on_click(0.0);
+        assert_eq!(fx.render(0.1, 0.0, 0.0)[0], (0, 0, 255));
+    }
+
+    #[test]
+    fn reactive_colori_a_caso_mai_neri() {
+        let mut fx = effect(json!({"layers": [reactive(json!({"randomColor": true, "duration": 500}))]}));
+        for k in 0..200 {
+            fx.on_click(k as f64);
+            let c = fx.render(k as f64, 0.0, 0.0)[0];
+            assert!(c != BLACK && [c.0, c.1, c.2].iter().all(|v| [0, 128, 255].contains(v)), "{c:?}");
+        }
     }
 }

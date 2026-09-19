@@ -3,7 +3,7 @@
 //!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
 //!
 //! Strumenti per verificare il port da Python pezzo per pezzo:
-//!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all]   frame in esadecimale
+//!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
 //!   demonnapse audio [secondi]                                               picco dell'uscita audio, 10 letture al secondo
@@ -48,11 +48,16 @@ fn load_json(path: PathBuf) -> Result<Value, String> {
 
 fn render(args: &[String]) -> Result<(), String> {
     let pos: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    let only = args.iter().position(|a| a == "--layer").and_then(|i| args.get(i + 1)).cloned();
-    let pos: Vec<&String> = pos.into_iter().filter(|a| Some(*a) != only.as_ref()).collect();
+    let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let only = opt("--layer");
+    // --clicks: istanti dei click in secondi, separati da virgole (per reactive e playback al click)
+    let clicks_arg = opt("--clicks");
+    let pos: Vec<&String> = pos.into_iter().filter(|a| Some(*a) != only.as_ref() && Some(*a) != clicks_arg.as_ref()).collect();
     let [title, t0, frames, fps] = pos[..] else {
-        return Err("uso: render \"<effetto>\" <t0> <frame> <fps> [--layer NOME] [--all] [--live]".into());
+        return Err("uso: render \"<effetto>\" <t0> <frame> <fps> [--layer NOME] [--all] [--live] [--clicks S,S,...]".into());
     };
+    let mut clicks: Vec<f64> = clicks_arg.iter().flat_map(|s| s.split(',')).filter_map(|s| s.trim().parse().ok()).collect();
+    clicks.sort_by(f64::total_cmp);
     let (t0, frames, fps): (f64, usize, f64) =
         (t0.parse().map_err(|_| "t0")?, frames.parse().map_err(|_| "frame")?, fps.parse().map_err(|_| "fps")?);
 
@@ -93,7 +98,11 @@ fn render(args: &[String]) -> Result<(), String> {
             let due = std::time::Duration::from_secs_f64(n as f64 / fps);
             std::thread::sleep(due.saturating_sub(start.elapsed()));
         }
-        let frame = fx.render(t0 + n as f64 / fps, 1.0 / fps, 0.0);
+        let now = t0 + n as f64 / fps;
+        while clicks.first().is_some_and(|&c| c <= now) {
+            fx.on_click(clicks.remove(0));
+        }
+        let frame = fx.render(now, 1.0 / fps, 0.0);
         let hex: Vec<String> = frame.iter().map(|c| format!("{:02X}{:02X}{:02X}", c.0, c.1, c.2)).collect();
         println!("{}", hex.join(" "));
     }

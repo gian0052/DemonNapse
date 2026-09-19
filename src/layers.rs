@@ -141,6 +141,17 @@ impl Rng {
             }
         }
     }
+    /// Colore a caso del Reactive (misurato con click veri): ogni canale 0, 128 o 255, mai nero
+    /// (sono usciti anche 0,0,128 e 128,128,0).
+    pub fn any_color(&mut self) -> Rgb {
+        loop {
+            let mut ch = || [0u8, 128, 255][((self.f64() * 3.0) as usize).min(2)];
+            let c = (ch(), ch(), ch());
+            if c != BLACK {
+                return c;
+            }
+        }
+    }
 }
 
 /// Posizione sulla tela di ogni LED fisico, ricavata dalla griglia di Chroma Studio
@@ -233,8 +244,8 @@ pub fn stops(p: &Value) -> Option<Stops> {
 #[derive(Clone, Copy, PartialEq)]
 enum End {
     Never,
-    After(u32), // dopo N cicli (`cycles`)
-    Toggle,     // al click successivo
+    After(u32),  // dopo N cicli (`cycles`)
+    Toggle(u32), // come After, ma un click mentre gira lo ferma
 }
 
 #[derive(Clone, Copy)]
@@ -273,6 +284,7 @@ pub struct Layer {
     end: End,
     running: bool,
     start: f64, // istante del click che l'ha fatto partire: l'animazione riparte da capo
+    lead: f64,  // s gia' passati al click (wave: uno scatto del motore)
     kind: Kind,
 }
 
@@ -294,11 +306,12 @@ impl Layer {
         let on_press = matches!(p.get("playbackStart").and_then(Value::as_str), Some("onPress" | "onSelectedKeys"));
         let end = match p.get("playbackEnd").and_then(Value::as_str) {
             _ if !on_press => End::Never,
-            Some("toggle") => End::Toggle,
+            Some("toggle") => End::Toggle(num(p, "cycles", 1.0).max(1.0) as u32),
             Some("never") => End::Never,
             _ => End::After(num(p, "cycles", 1.0).max(1.0) as u32),
         };
         let mut running = !on_press;
+        let mut lead = 0.0;
         let (middle, size) = canvas.region(&leds);
         let kind = match name {
             "static" => Kind::Static(color(p, "color").or_else(|| color(p, "color2"))),
@@ -348,7 +361,12 @@ impl Layer {
                         };
                         pos / length
                     })
-                    .collect();
+                    .collect::<Vec<f64>>();
+                // wave partito con un click (misurato con click veri): al click il motore e' gia'
+                // avanti di uno scatto
+                if !tidal && spin.is_none() {
+                    lead = WAVE_TICK;
+                }
                 Kind::Scroll { stops: st, phase, hz, pause, clear_black: tidal }
             }
             "wheel" => {
@@ -417,21 +435,21 @@ impl Layer {
             }
             _ => return None,
         };
-        Some(Layer { leds, on_press, end, running, start: 0.0, kind })
+        Some(Layer { leds, on_press, end, running, start: 0.0, lead, kind })
     }
 
     pub fn press(&mut self, now: f64) {
         if let Kind::Ripple { rings, period, next, .. } = &mut self.kind {
             match self.end {
                 // toggle: il click accende o spegne l'emissione di anelli
-                End::Toggle => *next = if next.is_finite() { f64::INFINITY } else { now },
+                End::Toggle(_) => *next = if next.is_finite() { f64::INFINITY } else { now },
                 // un anello per ciclo, uno ogni periodo
                 End::After(n) => rings.extend((0..n).map(|k| now + k as f64 * *period)),
                 End::Never => rings.push(now),
             }
             return;
         }
-        if self.end == End::Toggle && self.running {
+        if matches!(self.end, End::Toggle(_)) && self.running {
             self.running = false;
             return;
         }
@@ -454,13 +472,20 @@ impl Layer {
         }
         let on_press = self.on_press;
         // partito con un click: l'animazione riparte da capo e si ferma dopo N cicli
-        let t = if on_press { now - self.start } else { now };
-        if let (true, End::After(n), Some(c)) = (on_press, self.end, self.cycle()) {
-            if t >= n as f64 * c {
+        let t = if on_press { now - self.start + self.lead } else { now };
+
+        let cycles = match (on_press, self.end) {
+            (true, End::After(n) | End::Toggle(n)) => Some(n as f64),
+            _ => None,
+        };
+        let scroll = matches!(self.kind, Kind::Scroll { .. });
+        if let (Some(n), Some(c), false) = (cycles, self.cycle(), scroll) {
+            if t >= n * c {
                 self.running = false;
                 return;
             }
         }
+        let mut lit_any = false;
         for (n, &i) in self.leds.iter().enumerate() {
             let out: Option<(Rgb, f64)> = match &mut self.kind {
                 Kind::Static(c) => c.map(|c| (c, 1.0)),
@@ -468,13 +493,25 @@ impl Layer {
                 Kind::Scroll { stops, phase, hz, pause, clear_black } => {
                     // u = quanta parte del gradiente e' gia' passata sul LED; con la pausa, dopo un
                     // passaggio il LED resta spento per `pause` cicli
-                    let u = (t * *hz - phase[n]).rem_euclid(1.0 + *pause);
+                    let raw = t * *hz - phase[n];
+                    // partito con un click e N cicli (misurato con click veri, wave speed 25): ogni LED
+                    // riparte dal punto del gradiente in cui si trova, scorre fino all'inizio del
+                    // gradiente, fa altri N-1 giri interi e si spegne
+                    let over = cycles.is_some_and(|k| {
+                        let per = 1.0 + *pause;
+                        let b0 = self.lead * *hz - phase[n]; // dove era il LED al click
+                        let (a, b) = if *hz >= 0.0 { (raw, b0) } else { (-raw, -b0) };
+                        a >= ((b / per - 1e-9).ceil() + k - 1.0) * per
+                    });
+                    lit_any |= !over;
+                    let u = raw.rem_euclid(1.0 + *pause);
                     let c = gradient(stops, (-u).rem_euclid(1.0));
-                    (u < 1.0 && !(*clear_black && c == BLACK)).then_some((c, 1.0))
+                    (!over && u < 1.0 && !(*clear_black && c == BLACK)).then_some((c, 1.0))
                 }
                 Kind::Ripple { table, speed, width, period, dist, rings, next } => {
-                    // il fronte parte da dove si accende il LED piu' vicino al centro
-                    let start = dist.iter().cloned().fold(f64::INFINITY, f64::min) - 1.0;
+                    // il fronte parte dal centro del mouse (misurato con click veri: il primo anello
+                    // arriva al LED piu' vicino, a 2 celle, 0,1 s dopo il click a speed 10)
+                    let start = 0.0;
                     if n == 0 {
                         if now >= *next {
                             rings.push(now);
@@ -494,7 +531,8 @@ impl Layer {
                         } else {
                             (r - (d - 1.0)).min(d + *width - r).min(1.0)
                         };
-                        if light > 0.0 && best.map_or(true, |b| light > b.1) {
+                        // anelli sovrapposti (click ravvicinati, misurato): vince il piu' recente
+                        if light > 0.0 {
                             let k = r.floor().max(d).clamp(0.0, (table.len() - 1) as f64) as usize;
                             best = Some((table[k], light));
                         }
@@ -562,7 +600,11 @@ impl Layer {
                 frame[i] = if a >= 1.0 { c } else { lerp(frame[i], c, a) };
             }
         }
+        if scroll && cycles.is_some() && !lit_any {
+            self.running = false; // tutti i LED hanno finito i loro giri: un click lo fa ripartire
+        }
     }
+
 }
 
 #[cfg(test)]
@@ -678,25 +720,54 @@ mod tests {
         p
     }
 
-    #[test]
-    fn dopo_n_cicli_si_ferma() {
-        // speed 25 = un ciclo al secondo (misurato); 2 cicli dal click a t=10
-        let mut l = layer("wave", wave(json!({"playbackStart": "onPress", "playbackEnd": "after", "cycles": 2})), json!({}));
-        assert!(!lit(&mut l, 5.0), "prima del click non si vede");
-        l.press(10.0);
-        assert!(lit(&mut l, 10.5) && lit(&mut l, 11.9), "acceso per due cicli");
-        assert!(!lit(&mut l, 12.1), "spento dopo il secondo ciclo");
-        l.press(20.0);
-        assert!(lit(&mut l, 20.1), "un nuovo click lo fa ripartire");
+    /// Wave su tutto il mouse partito con un click: quali LED sono accesi all'istante `t`.
+    fn wave_lit(l: &mut Layer, t: f64) -> Vec<bool> {
+        let mut frame = vec![BLACK; ALL.len()];
+        l.paint(t, &mut frame, &mut Rng::new(1));
+        frame.iter().map(|&c| c != BLACK).collect()
+    }
+
+    fn wave_all(extra: Value) -> Layer {
+        let grid: HashMap<(i64, i64), usize> = ALL.iter().enumerate().map(|(n, &rc)| (rc, n)).collect();
+        let p = wave(json!({"angle": 90, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 50, "Color": 0x00FF00}, {"Stop": 100, "Color": 0x0000FF}]}));
+        let mut p = p;
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        Layer::new("wave", (0..ALL.len()).collect(), &p, &json!({}), &Canvas::new(&grid, ALL.len()), &mut Rng::new(1)).unwrap()
     }
 
     #[test]
-    fn toggle_acceso_e_spento_dai_click() {
-        let mut l = layer("wave", wave(json!({"playbackStart": "onPress", "playbackEnd": "toggle"})), json!({}));
+    fn dopo_n_cicli_ogni_led_finisce_il_suo_giro() {
+        // misurato con click veri (speed 25, width 100, angle 90, 2 cicli): dopo il click la colonna
+        // di sinistra resta accesa ~1,05 s, quella centrale ~1,45 s, quella di destra ~1,8 s
+        let mut l = wave_all(json!({"playbackStart": "onPress", "playbackEnd": "after", "cycles": 2}));
+        assert!(!wave_lit(&mut l, 5.0).iter().any(|&x| x), "prima del click non si vede");
+        l.press(10.0);
+        let (left, mid, right) = (2, 0, 10); // (1,0), (0,2), (0,4)
+        let on = wave_lit(&mut l, 10.95);
+        assert!(on[left] && on[mid] && on[right]);
+        let on = wave_lit(&mut l, 11.15);
+        assert!(!on[left] && on[mid] && on[right]);
+        let on = wave_lit(&mut l, 11.55);
+        assert!(!on[mid] && on[right]);
+        assert!(!wave_lit(&mut l, 11.95).iter().any(|&x| x), "tutto spento");
+        l.press(20.0);
+        assert!(wave_lit(&mut l, 20.01)[right], "un nuovo click lo fa ripartire");
+    }
+
+    #[test]
+    fn toggle_un_click_lo_ferma_uno_lo_riaccende() {
+        // misurato: con toggle (1 ciclo) l'onda fa il suo giro e si spegne da sola; un click mentre
+        // gira la spegne subito, un click da spenta la fa ripartire
+        let mut l = wave_all(json!({"playbackStart": "onPress", "playbackEnd": "toggle", "cycles": 1}));
         l.press(1.0);
-        assert!(lit(&mut l, 50.0), "resta acceso finche' non si clicca di nuovo");
-        l.press(51.0);
-        assert!(!lit(&mut l, 52.0));
+        assert!(wave_lit(&mut l, 1.3)[10]);
+        l.press(1.4);
+        assert!(!wave_lit(&mut l, 1.45).iter().any(|&x| x), "il click mentre gira la spegne");
+        l.press(2.0);
+        assert!(wave_lit(&mut l, 2.8)[10]);
+        assert!(!wave_lit(&mut l, 2.95).iter().any(|&x| x), "finito il giro si spegne da sola");
+        l.press(4.0);
+        assert!(wave_lit(&mut l, 4.1)[10], "un click dopo la fine la fa ripartire");
     }
 
     #[test]
