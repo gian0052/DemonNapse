@@ -97,6 +97,7 @@ fn probe() -> Result<(), String> {
     let (ctl, resp) = razerhid::open_control(&mut api, cfg.pid(), 2)?;
     println!("firmware: {}.{}", resp[8], resp[9]);
     println!("slot attivo: {:?}", razerhid::get_active_profile(&ctl));
+    println!("modo: {:?} (0 = normale, 3 = driver)", razerhid::get_device_mode(&ctl));
     println!("interfacce eventi: {}", razerhid::open_events(&api, cfg.pid()).len());
     Ok(())
 }

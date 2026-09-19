@@ -77,6 +77,17 @@ pub fn custom_frame(h: &HidDevice, colors: &[Rgb]) -> Result<(), String> {
     send(h, &build(0x0F, 0x03, args.len() as u8, &args))
 }
 
+/// Modo del mouse: 0 = normale (i pulsanti li gestisce il mouse, profili on-board compresi),
+/// 3 = driver (li manda al software: e' il modo in cui lo lascia Synapse se viene chiuso di forza).
+pub fn get_device_mode(h: &HidDevice) -> Option<u8> {
+    let resp = transact(h, &build(0x00, 0x84, 0x02, &[])).ok()?;
+    (resp[0] == 0x02).then_some(resp[8])
+}
+
+pub fn set_device_mode(h: &HidDevice, mode: u8) -> bool {
+    transact(h, &build(0x00, 0x04, 0x02, &[mode, 0x00])).map(|r| r[0] == 0x02).unwrap_or(false)
+}
+
 pub fn get_active_profile(h: &HidDevice) -> Option<u8> {
     let resp = transact(h, &build(0x05, 0x84, 0x01, &[])).ok()?;
     (resp[0] == 0x02).then_some(resp[8])

@@ -88,6 +88,11 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
 
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
     let (ctl, _) = razerhid::open_control(&mut api, cfg.pid(), CONTROL_RETRIES)?;
+    // Synapse chiuso di forza lascia il mouse in modo driver: il pulsante dei profili non cambia piu' slot
+    if let Some(mode @ 1..) = razerhid::get_device_mode(&ctl) {
+        let ok = razerhid::set_device_mode(&ctl, 0);
+        info!("mouse in modo {mode} (driver): rimesso in modo normale{}", if ok { "" } else { " - FALLITO" });
+    }
     let events = razerhid::open_events(&api, cfg.pid());
     let now = || clock.elapsed().as_secs_f64();
     let mut tracker = ProfileTracker::new(&ctl, active.iter().map(|a| a.slot).collect(), now());
@@ -115,7 +120,9 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
 
         let mut changed = false;
         for h in &events {
-            while let Ok(n @ 1..) = h.read(&mut buf) {
+            // timeout di 1 ms e non lettura non bloccante: con timeout 0 il backend Windows di hidapi
+            // prende ERROR_IO_INCOMPLETE per un errore, abbandona la lettura in corso e perde gli eventi
+            while let Ok(n @ 1..) = h.read_timeout(&mut buf, 1) {
                 debug!("evento {}", buf[..n.min(6)].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" "));
                 changed |= tracker.feed(&ctl, &buf[..n], t);
             }
