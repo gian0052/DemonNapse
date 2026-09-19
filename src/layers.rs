@@ -262,8 +262,9 @@ enum Kind {
     Spectrum { stops: Stops, period: f64 },
     /// Wave, Tidal e Wheel: il gradiente scorre, `phase` e' la posizione di ogni LED della regione.
     /// `pause`: cicli di buio dopo ogni passaggio (wave). `clear_black`: il nero lascia vedere i
-    /// layer sotto (tidal).
-    Scroll { stops: Stops, phase: Vec<f64>, hz: f64, pause: f64, clear_black: bool },
+    /// layer sotto (tidal). `per_led`: partito con un click, ogni LED finisce il suo giro (wave,
+    /// tidal); altrimenti tutto si spegne insieme dopo N cicli (wheel).
+    Scroll { stops: Stops, phase: Vec<f64>, hz: f64, pause: f64, clear_black: bool, per_led: bool },
     /// Anelli dal centro del mouse: `dist` e' la distanza di ogni LED in celle, `table` i colori
     /// per raggio, `rings` gli istanti in cui sono partiti, `next` quando parte il prossimo
     /// (infinito = aspetta un click).
@@ -367,13 +368,17 @@ impl Layer {
                 if !tidal && spin.is_none() {
                     lead = WAVE_TICK;
                 }
-                Kind::Scroll { stops: st, phase, hz, pause, clear_black: tidal }
+                Kind::Scroll { stops: st, phase, hz, pause, clear_black: tidal, per_led: true }
             }
             "wheel" => {
                 let (cx, cy) = center_point(lp).unwrap_or(middle);
                 let dir = if flag(lp, "counterclockwise") { -1.0 } else { 1.0 };
-                let phase = leds.iter().map(|&i| (canvas.pos[i].1 - cy).atan2(canvas.pos[i].0 - cx) / TAU).collect();
-                Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) / 360.0 * dir, pause: 0.0, clear_black: false }
+                // l'angolo parte da sinistra del centro (misurato con click veri: al click il gradiente e'
+                // mezzo giro avanti rispetto all'angolo contato da destra)
+                let phase = leds.iter().map(|&i| (canvas.pos[i].1 - cy).atan2(canvas.pos[i].0 - cx) / TAU + 0.5).collect();
+                // partito con un click (misurato con click veri, speed 180): gira N giri interi e si
+                // spegne tutto insieme
+                Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) / 360.0 * dir, pause: 0.0, clear_black: false, per_led: false }
             }
             "ripple" => {
                 running = true;
@@ -449,9 +454,14 @@ impl Layer {
             }
             return;
         }
-        if matches!(self.end, End::Toggle(_)) && self.running {
-            self.running = false;
-            return;
+        // misurato con click veri (wheel, breathing): con After un click mentre gira non conta
+        match self.end {
+            End::Toggle(_) if self.running => {
+                self.running = false;
+                return;
+            }
+            End::After(_) if self.running => return,
+            _ => {}
         }
         self.running = true;
         self.start = now;
@@ -478,7 +488,7 @@ impl Layer {
             (true, End::After(n) | End::Toggle(n)) => Some(n as f64),
             _ => None,
         };
-        let scroll = matches!(self.kind, Kind::Scroll { .. });
+        let scroll = matches!(self.kind, Kind::Scroll { per_led: true, .. });
         if let (Some(n), Some(c), false) = (cycles, self.cycle(), scroll) {
             if t >= n * c {
                 self.running = false;
@@ -490,14 +500,14 @@ impl Layer {
             let out: Option<(Rgb, f64)> = match &mut self.kind {
                 Kind::Static(c) => c.map(|c| (c, 1.0)),
                 Kind::Spectrum { stops, period } => Some((gradient(stops, now.rem_euclid(*period) / *period), 1.0)),
-                Kind::Scroll { stops, phase, hz, pause, clear_black } => {
+                Kind::Scroll { stops, phase, hz, pause, clear_black, per_led } => {
                     // u = quanta parte del gradiente e' gia' passata sul LED; con la pausa, dopo un
                     // passaggio il LED resta spento per `pause` cicli
                     let raw = t * *hz - phase[n];
                     // partito con un click e N cicli (misurato con click veri, wave speed 25): ogni LED
                     // riparte dal punto del gradiente in cui si trova, scorre fino all'inizio del
                     // gradiente, fa altri N-1 giri interi e si spegne
-                    let over = cycles.is_some_and(|k| {
+                    let over = *per_led && cycles.is_some_and(|k| {
                         let per = 1.0 + *pause;
                         let b0 = self.lead * *hz - phase[n]; // dove era il LED al click
                         let (a, b) = if *hz >= 0.0 { (raw, b0) } else { (-raw, -b0) };
@@ -768,6 +778,30 @@ mod tests {
         assert!(!wave_lit(&mut l, 2.95).iter().any(|&x| x), "finito il giro si spegne da sola");
         l.press(4.0);
         assert!(wave_lit(&mut l, 4.1)[10], "un click dopo la fine la fa ripartire");
+    }
+
+    #[test]
+    fn wheel_dopo_n_giri_si_spegne_tutto_insieme_e_ignora_i_click() {
+        // misurato con click veri (speed 180, 2 cicli): 4 s dal click, i click in mezzo non contano
+        let p = json!({"speed": 180, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0x0000FF}],
+                       "playbackStart": "onPress", "playbackEnd": "after", "cycles": 2});
+        let mut l = layer("wheel", p, json!({}));
+        assert!(!lit(&mut l, 1.0));
+        l.press(10.0);
+        l.press(12.0);
+        assert!(lit(&mut l, 13.99), "tutti accesi fino alla fine");
+        assert!(!lit(&mut l, 14.01), "spenti tutti insieme dal primo click");
+    }
+
+    #[test]
+    fn breathing_after_ignora_i_click_mentre_gira() {
+        // misurato con click veri (durata 6000, 2 cicli): 12 s dal primo click
+        let p = json!({"color": 0xFF0000, "color2": 0x0000FF, "duration": 6000, "playbackStart": "onPress", "playbackEnd": "after", "cycles": 2});
+        let mut l = layer("breathing", p, json!({}));
+        l.press(0.0);
+        l.press(10.0);
+        assert!(lit(&mut l, 10.5));
+        assert!(!lit(&mut l, 12.5), "finito a 12 s, il click a 10 s non l'ha fatto ripartire");
     }
 
     #[test]
