@@ -30,14 +30,17 @@ const WAVE_TICK: f64 = 0.04;
 const WAVE_TICKS: f64 = 625.0;
 const TIDAL_PERIOD: f64 = 50.0; // s * speed: speed 10 -> 5,0 s, 15 -> 3,33 s, 30 -> 1,66 s
 // Wheel: "speed" = gradi al secondo (60 -> un giro in 6 s, 120 -> 3 s).
-// Ripple: un anello dal centro della regione ogni (19,6 + 0,02 * width) / speed + 0,08 s; il fronte
-// avanza di 1,3 * speed celle al secondo, spesso 1 + width/100 celle; ogni LED si accende alla
-// sua distanza dal centro arrotondata alla cella. La parte di gradiente visibile nell'anello
-// (dal 25% al 60%) e la sfumatura ai bordi (20%) sono ricavate con un fit: stima.
-const RIPPLE_PERIOD: (f64, f64, f64) = (19.6, 0.02, 0.08);
-const RIPPLE_CELLS_S: f64 = 1.3;
-const RIPPLE_GRADIENT: (f64, f64) = (0.25, 0.60);
-const RIPPLE_EDGE: f64 = 0.2;
+// Ripple: gli anelli partono dal centro del MOUSE (non della regione) e il fronte avanza di
+// `speed` celle al secondo. Un LED a distanza D (in celle, arrotondata) si accende quando il
+// fronte r arriva a D-1, e' pieno da D a D+W-1 (W = width/100) e si spegne a D+W. Il colore e'
+// la voce max(floor(r), D) di una tabella di 6+W colori ricavata dal gradiente (`ripple_table`).
+// Con speed > 12,5 (piu' di mezza cella ogni 40 ms) il motore non sfuma: LED pieno per
+// D <= floor(r) <= D+W-1, spento altrimenti. Speed 50 va come 25.
+// Un anello nuovo ogni floor((20 + 2W) / (0,08 * speed)) + 1 passi da 80 ms (misurato su 13
+// combinazioni di speed 1..35 e width 100..400: speed 1 -> 22,08 s, 10 -> 2,24 s, 20 -> 1,12 s).
+const RIPPLE_TABLE: f64 = 6.0;
+const RIPPLE_TRAVEL: f64 = 20.0;
+const RIPPLE_STEP: f64 = 0.08;
 // Starlight: al massimo density*10% dei LED accesi; nascono circa 6/durata stelle al secondo;
 // ogni stella vive tra il 20% e il 100% della durata con una luce casuale fissa (20..87%).
 const STAR_SPAWN: f64 = 6.0;
@@ -73,6 +76,34 @@ pub fn gradient(stops: &[(f64, Rgb)], pos: f64) -> Rgb {
         }
     }
     stops.last().map(|s| s.1).unwrap_or(BLACK)
+}
+
+/// Tabella di `n` colori del ripple, come la costruisce il motore (misurato con gradienti a 2 e 3
+/// stop in posizioni diverse): ogni tratto tra due stop occupa le voci da round(stop * n / 100)
+/// alla successiva; nei tratti interni lo stop di arrivo cade sull'ultima voce del tratto, nell'ultimo
+/// tratto no (voce j di L: j / (L - 1) nei tratti interni, j / L nell'ultimo).
+fn ripple_table(stops: &[(f64, Rgb)], n: usize) -> Vec<Rgb> {
+    let mut st: Stops = stops.to_vec();
+    st.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (Some(&first), Some(&last)) = (st.first(), st.last()) else { return vec![BLACK; n.max(1)] };
+    if first.0 > 0.0 {
+        st.insert(0, (0.0, first.1));
+    }
+    if last.0 < 100.0 {
+        st.push((100.0, last.1));
+    }
+    let at = |s: f64| ((s * n as f64 / 100.0 + 0.5).floor() as usize).min(n);
+    let mut table = Vec::with_capacity(n);
+    let segs = st.len() - 1;
+    for (k, w) in st.windows(2).enumerate() {
+        let len = at(w[1].0) - at(w[0].0);
+        let div = if k + 1 == segs { len } else { len.saturating_sub(1) };
+        for j in 0..len {
+            table.push(lerp(w[0].1, w[1].1, if div > 0 { j as f64 / div as f64 } else { 0.0 }));
+        }
+    }
+    table.resize(n.max(1), last.1);
+    table
 }
 
 /// Interpolazione lineare in una tabella [(x, y)] ordinata per x.
@@ -118,6 +149,7 @@ impl Rng {
 /// della sua cella (misurato: il centro del wheel cade esattamente su righe e colonne intere).
 pub struct Canvas {
     pub pos: Vec<(f64, f64)>,
+    middle: (f64, f64), // centro della griglia del mouse: da qui partono gli anelli del ripple
 }
 
 impl Canvas {
@@ -128,7 +160,9 @@ impl Canvas {
                 pos[i] = (c as f64 * CELL, r as f64 * CELL);
             }
         }
-        Canvas { pos }
+        let mut canvas = Canvas { pos, middle: (0.0, 0.0) };
+        canvas.middle = canvas.region(&grid.values().cloned().filter(|&i| i < leds).collect::<Vec<_>>()).0;
+        canvas
     }
 
     /// Posizione del LED rispetto a `center` con ogni asse diviso per la sua estensione in
@@ -213,9 +247,10 @@ enum Kind {
     /// `pause`: cicli di buio dopo ogni passaggio (wave). `clear_black`: il nero lascia vedere i
     /// layer sotto (tidal).
     Scroll { stops: Stops, phase: Vec<f64>, hz: f64, pause: f64, clear_black: bool },
-    /// Anelli dal centro della regione: `dist` e' la distanza di ogni LED in celle, `rings` gli
-    /// istanti in cui sono partiti, `next` quando parte il prossimo (infinito = aspetta un click).
-    Ripple { stops: Stops, cells_s: f64, thick: f64, period: f64, dist: Vec<f64>, rings: Vec<f64>, next: f64 },
+    /// Anelli dal centro del mouse: `dist` e' la distanza di ogni LED in celle, `table` i colori
+    /// per raggio, `rings` gli istanti in cui sono partiti, `next` quando parte il prossimo
+    /// (infinito = aspetta un click).
+    Ripple { table: Vec<Rgb>, speed: f64, width: f64, period: f64, dist: Vec<f64>, rings: Vec<f64>, next: f64 },
     /// Stelle che nascono a caso: il gradiente e' la vita di una stella, `max` quante insieme.
     Starlight { stops: Stops, rnd: bool, life: f64, max: usize, rate: f64, stars: Vec<Option<Star>>, last: Option<f64> },
     /// `rnd`: un respiro per `period` con un colore a caso; altrimenti un ciclo per `period`:
@@ -318,13 +353,17 @@ impl Layer {
             }
             "ripple" => {
                 running = true;
-                let (speed, width) = (num(p, "speed", 10.0).max(1.0), num(p, "width", 300.0).max(1.0));
-                let dist = leds.iter().map(|&i| ((canvas.pos[i].0 - middle.0) / CELL).hypot((canvas.pos[i].1 - middle.1) / CELL).round()).collect();
+                let (speed, width) = (num(p, "speed", 10.0).max(1.0), num(p, "width", 300.0).max(100.0) / 100.0);
+                // misurato: speed 50 (il massimo) va come 25, stesso periodo e stesso passo; 45..49 no
+                let speed = if speed >= 50.0 { 25.0 } else { speed };
+                let c = canvas.middle;
+                let dist = leds.iter().map(|&i| ((canvas.pos[i].0 - c.0) / CELL).hypot((canvas.pos[i].1 - c.1) / CELL).round()).collect();
+                let steps = ((RIPPLE_TRAVEL + 2.0 * width) / (RIPPLE_STEP * speed) + 1e-9).floor() + 1.0;
                 Kind::Ripple {
-                    stops: stops(p)?,
-                    cells_s: RIPPLE_CELLS_S * speed,
-                    thick: 1.0 + width / 100.0,
-                    period: (RIPPLE_PERIOD.0 + RIPPLE_PERIOD.1 * width) / speed + RIPPLE_PERIOD.2,
+                    table: ripple_table(&stops(p)?, (RIPPLE_TABLE + width).round() as usize),
+                    speed,
+                    width,
+                    period: steps * RIPPLE_STEP,
                     dist,
                     rings: Vec::new(),
                     next: if on_press { f64::INFINITY } else { 0.0 }, // con un click: niente anelli finche' non si preme
@@ -427,28 +466,35 @@ impl Layer {
                     let c = gradient(stops, (-u).rem_euclid(1.0));
                     (u < 1.0 && !(*clear_black && c == BLACK)).then_some((c, 1.0))
                 }
-                Kind::Ripple { stops, cells_s, thick, period, dist, rings, next } => {
-                    let near = dist.iter().cloned().fold(f64::INFINITY, f64::min);
+                Kind::Ripple { table, speed, width, period, dist, rings, next } => {
+                    // il fronte parte da dove si accende il LED piu' vicino al centro
+                    let start = dist.iter().cloned().fold(f64::INFINITY, f64::min) - 1.0;
                     if n == 0 {
                         if now >= *next {
                             rings.push(now);
                             *next = now + *period;
                         }
                         let far = dist.iter().cloned().fold(0.0, f64::max);
-                        rings.retain(|&t0| near + (now - t0) * *cells_s - far < *thick);
+                        rings.retain(|&t0| start + (now - t0) * *speed < far + *width);
                     }
-                    // il fronte nasce sul LED piu' vicino al centro e si allarga
-                    let mut best: Option<f64> = None;
+                    let d = dist[n];
+                    let mut best: Option<(Rgb, f64)> = None;
                     for &t0 in rings.iter().filter(|&&t0| t0 <= now) {
-                        let k = (near + (now - t0) * *cells_s - dist[n]) / *thick; // 0 = fronte, 1 = coda
-                        if (0.0..1.0).contains(&k) && best.map_or(true, |b| k < b) {
-                            best = Some(k);
+                        let r = start + (now - t0) * *speed;
+                        let light = if *speed * RIPPLE_STEP / 2.0 > 0.5 {
+                            // oltre mezza cella per scatto da 40 ms niente sfumature: acceso pieno
+                            // mentre il fronte sta tra D e D+W
+                            if r.floor() >= d && r.floor() <= d + *width - 1.0 { 1.0 } else { 0.0 }
+                        } else {
+                            (r - (d - 1.0)).min(d + *width - r).min(1.0)
+                        };
+                        if light > 0.0 && best.map_or(true, |b| light > b.1) {
+                            let k = r.floor().max(d).clamp(0.0, (table.len() - 1) as f64) as usize;
+                            best = Some((table[k], light));
                         }
                     }
-                    best.map(|k| {
-                        let c = gradient(stops, RIPPLE_GRADIENT.0 + (RIPPLE_GRADIENT.1 - RIPPLE_GRADIENT.0) * k);
-                        (c, (k / RIPPLE_EDGE).min((1.0 - k) / RIPPLE_EDGE).min(1.0))
-                    })
+                    // dove passa l'anello copre i layer sotto, scurito (misurato sopra uno statico)
+                    best.map(|(c, light)| (dim(c, light), 1.0))
                 }
                 Kind::Starlight { stops, rnd, life, max, rate, stars, last } => {
                     if n == 0 {
@@ -741,6 +787,32 @@ mod tests {
         match &l.kind {
             Kind::Ripple { rings, .. } => assert_eq!(rings.len(), 3, "un anello per ciclo"),
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn tabella_del_ripple_come_razer() {
+        // voci lette sull'anteprima di Chroma Studio (width 400 -> 10 voci, voci 2..7)
+        let (r, g, b) = (rgb(0xFF0000), rgb(0x00FF00), rgb(0x0000FF));
+        let t = ripple_table(&[(0.0, r), (100.0, b)], 10);
+        assert_eq!(&t[2..8], &[(204, 0, 51), (178, 0, 76), (153, 0, 102), (127, 0, 127), (102, 0, 153), (76, 0, 178)]);
+        let t = ripple_table(&[(0.0, r), (50.0, g), (100.0, b)], 10);
+        assert_eq!(&t[2..7], &[(127, 127, 0), (63, 191, 0), (0, 255, 0), (0, 255, 0), (0, 204, 51)]);
+        let t = ripple_table(&[(30.0, r), (70.0, b)], 10);
+        assert_eq!(&t[2..8], &[(255, 0, 0), (255, 0, 0), (170, 0, 85), (85, 0, 170), (0, 0, 255), (0, 0, 255)]);
+        // width 100 -> 7 voci: lo stop al 50% cade sulla voce round(3,5) = 4
+        let t = ripple_table(&[(0.0, r), (50.0, g), (100.0, b)], 7);
+        assert_eq!(&t[2..5], &[(85, 170, 0), (0, 255, 0), (0, 255, 0)]);
+    }
+
+    #[test]
+    fn periodo_del_ripple_come_razer() {
+        // misurati sull'anteprima, in scatti da 40 ms: (speed, width, scatti)
+        for (speed, width, ticks) in [(1, 100, 552), (5, 300, 132), (7, 200, 86), (10, 400, 72), (13, 100, 44), (35, 400, 22), (45, 300, 16), (50, 300, 28)] {
+            let p = json!({"speed": speed, "width": width, "colorStops": [{"Stop": 0, "Color": 0xFF0000}]});
+            let l = layer("ripple", p, json!({}));
+            let Kind::Ripple { period, .. } = l.kind else { unreachable!() };
+            assert!((period / 0.04 - ticks as f64).abs() < 1e-6, "speed {speed} width {width}: {} scatti", period / 0.04);
         }
     }
 }
