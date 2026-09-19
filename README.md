@@ -89,8 +89,10 @@ Supported layers: **Static**, **Spectrum Cycling**, **Wave**, **Wheel**, **Tidal
 **Starlight**, **Breathing**, **Fire**, **Audio Meter** (system output peak via
 `IAudioMeterInformation`, no audio capture) and **Reactive** (mouse button flash), stacked in
 the same order as in Chroma Studio. When an effect has an Audio Meter, it has priority: the
-other layers only show after `audio_idle_delay` seconds of silence. Not supported yet:
-**Ambient Awareness** (it needs screen capture).
+other layers only show after `audio_idle_delay` seconds of silence. Playback options are honoured
+(start on a click, stop after N cycles or on the next click), and so are layer groups. Wheel and
+Tidal use the center point you set in Chroma Studio. Not supported yet: **Ambient Awareness** (it
+needs screen capture) and **Chroma Generate** (AI/pattern generator).
 
 Razer does not document what "speed 15" or "width 100" mean, so timings are calibrated by eye
 (constants at the top of `src/layers.rs`). To compare an effect with Synapse without assigning

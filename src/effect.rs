@@ -7,12 +7,29 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 const REACTIVE_RANDOM: [u32; 6] = [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF];
+const AUTO_BOOST_MAX: f64 = 4.0; // il massimo del cursore "boost" di Chroma Studio
+const AUTO_BOOST_HOLD: f64 = 5.0; // s: il picco di riferimento dell'auto boost scende a zero in questo tempo
 
 struct Audio {
     leds: Vec<usize>,
     stops: Stops,
     boost: f64,
+    auto_boost: bool,
     decay: f64,
+}
+
+/// I layer nell'ordine di Chroma Studio, con quelli dentro i gruppi (`type: "group"`) al posto
+/// del gruppo. Un gruppo nascosto nasconde tutti i suoi layer.
+fn flatten<'a>(layers: &'a [Value], out: &mut Vec<&'a Value>) {
+    for layer in layers {
+        if layer.get("type").and_then(Value::as_str) == Some("group") {
+            if layer.get("visible").and_then(Value::as_bool).unwrap_or(true) {
+                flatten(layer.get("layers").and_then(Value::as_array).map_or(&[], Vec::as_slice), out);
+            }
+        } else {
+            out.push(layer);
+        }
+    }
 }
 
 struct Reactive {
@@ -36,6 +53,7 @@ pub struct Effect {
     reactive: Vec<Reactive>,
     flashes: Vec<Flash>,
     level: f64,
+    reference: f64,  // auto boost: picco recente, che il boost porta verso il massimo
     last_audio: f64, // ultimo istante con audio sopra la soglia
     silence_floor: f64,
     gain: f64,
@@ -55,6 +73,7 @@ impl Effect {
             reactive: Vec::new(),
             flashes: Vec::new(),
             level: 0.0,
+            reference: 0.0,
             last_audio: -1e9,
             silence_floor: cfg.audio_silence_floor,
             gain: cfg.audio_gain,
@@ -63,9 +82,10 @@ impl Effect {
         };
         let mut unsupported = Vec::new();
         let empty = Value::Object(Default::default());
-        let layers = spec.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut layers = Vec::new();
+        flatten(spec.get("layers").and_then(Value::as_array).map_or(&[], Vec::as_slice), &mut layers);
         // in Chroma Studio il primo layer della lista sta sopra: applico dal fondo
-        for layer in layers.iter().rev() {
+        for layer in layers.into_iter().rev() {
             if !layer.get("visible").and_then(Value::as_bool).unwrap_or(true) {
                 continue;
             }
@@ -85,7 +105,8 @@ impl Effect {
                     "audio" => {
                         if let Some(st) = stops(p) {
                             let num = |k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d);
-                            fx.audio.push(Audio { leds, stops: st, boost: num("boost", 1.0), decay: num("decay", 0.5) });
+                            let auto_boost = p.get("autoBoost").and_then(Value::as_bool).unwrap_or(false);
+                            fx.audio.push(Audio { leds, stops: st, boost: num("boost", 1.0), auto_boost, decay: num("decay", 1.0) });
                         }
                     }
                     "reactive" => {
@@ -142,8 +163,12 @@ impl Effect {
     /// `peak`: picco dell'uscita audio (0..1), letto dal chiamante solo se `has_audio()`.
     pub fn render(&mut self, now: f64, dt: f64, peak: f64) -> Vec<Rgb> {
         let floor = self.silence_floor;
+        // auto boost: il riferimento segue i picchi e poi scende piano, il boost porta il
+        // riferimento verso il fondo scala (stima: Razer non documenta come lo calcola)
+        self.reference = (self.reference - dt / AUTO_BOOST_HOLD).max(peak);
         for a in &self.audio {
-            let p = (peak * a.boost * self.gain).min(1.0);
+            let boost = if a.auto_boost { (1.0 / self.reference.max(1.0 / AUTO_BOOST_MAX)).min(AUTO_BOOST_MAX) } else { a.boost };
+            let p = (peak * boost * self.gain).min(1.0);
             self.level = p.max(self.level - dt / a.decay.max(0.05));
             if self.level > floor {
                 self.last_audio = now;
@@ -174,5 +199,61 @@ impl Effect {
             }
         }
         frame
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn cfg() -> Config {
+        serde_json::from_value(json!({"device": {"pid": "0x00CB", "leds": 2, "chroma_grid": {"0,0": 0, "1,0": 1}}})).unwrap()
+    }
+
+    fn effect(spec: Value) -> Effect {
+        let cfg = cfg();
+        let grid = cfg.grid();
+        Effect::new(&spec, &cfg, &grid, &Canvas::new(&grid, 2), 1).0
+    }
+
+    fn region(params: Value) -> Value {
+        json!([{"params": params, "devices": [{"leds": [{"row": 0, "col": 0}, {"row": 1, "col": 0}]}]}])
+    }
+
+    #[test]
+    fn i_layer_dentro_un_gruppo_si_vedono() {
+        let red = json!({"name": "static", "visible": true, "regions": region(json!({"color": 0xFF0000}))});
+        let mut fx = effect(json!({"layers": [{"type": "group", "visible": true, "layers": [red.clone()]}]}));
+        assert_eq!(fx.render(0.0, 0.016, 0.0), vec![(255, 0, 0); 2]);
+        let mut hidden = effect(json!({"layers": [{"type": "group", "visible": false, "layers": [red]}]}));
+        assert_eq!(hidden.render(0.0, 0.016, 0.0), vec![BLACK; 2]);
+    }
+
+    fn meter(extra: Value) -> Effect {
+        let mut p = json!({"boost": 1, "colorStops": [{"Stop": 0, "Color": 0x00FF00}, {"Stop": 100, "Color": 0xFF0000}]});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        effect(json!({"layers": [{"name": "audio", "visible": true, "regions": region(p)}]}))
+    }
+
+    #[test]
+    fn auto_boost_porta_un_suono_basso_verso_il_fondo_scala() {
+        let (mut fixed, mut auto) = (meter(json!({})), meter(json!({"autoBoost": true})));
+        let mut t = 0.0;
+        for _ in 0..120 {
+            t += 1.0 / 60.0;
+            fixed.render(t, 1.0 / 60.0, 0.25);
+            auto.render(t, 1.0 / 60.0, 0.25);
+        }
+        assert!((fixed.level - 0.25).abs() < 1e-9);
+        assert!(auto.level > 0.95, "auto boost: livello {}", auto.level);
+    }
+
+    #[test]
+    fn decay_di_default_un_secondo() {
+        let mut fx = meter(json!({}));
+        fx.render(0.0, 0.0, 1.0);
+        fx.render(0.5, 0.5, 0.0);
+        assert!((fx.level - 0.5).abs() < 1e-9, "livello {}", fx.level);
     }
 }

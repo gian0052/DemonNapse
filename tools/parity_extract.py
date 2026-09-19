@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.ERROR)
 import demonnapse as d
 import extract_effects as ex
 
-EXE = os.path.join(HERE, "target", "release", "demonnapse.exe")
+EXE = os.environ.get("DEMONNAPSE_EXE") or os.path.join(HERE, "target", "release", "demonnapse.exe")
 FILES = ("chroma_effects_dump.json", "synapse_profiles.json")
 
 

@@ -18,6 +18,7 @@ pub type Stops = Vec<(f64, Rgb)>;
 pub const BLACK: Rgb = (0, 0, 0);
 const DEV_W: f64 = 200.0; // tela del dispositivo in Chroma Studio (px)
 const DEV_H: f64 = 320.0;
+const CELL: f64 = 40.0; // lato di una cella della griglia dei LED sulla tela dell'editor (px)
 
 const WAVE_HZ: f64 = 1.0 / 35.0; // cicli al secondo per unita' di "speed" (wave e tidal)
 const WHEEL_DEG_S: f64 = 2.0; // gradi al secondo per unita' di "speed"
@@ -67,32 +68,49 @@ impl Rng {
 }
 
 /// Posizione sulla tela di ogni LED fisico, ricavata dalla griglia di Chroma Studio
-/// ({(riga, colonna): indice LED}); la griglia copre tutta la tela.
+/// ({(riga, colonna): indice LED}). Il motore di Razer lavora sulla griglia dei LED, con celle
+/// da 40 px sulla tela dell'editor (`centerPointX` = px / 40): la tela del mouse, 200x320 px,
+/// e' 5x8 celle, e ogni LED sta al centro della sua cella.
 pub struct Canvas {
     pub pos: Vec<(f64, f64)>,
 }
 
 impl Canvas {
     pub fn new(grid: &HashMap<(i64, i64), usize>, leds: usize) -> Self {
-        let rows = grid.keys().map(|k| k.0).max().unwrap_or(1).max(1) as f64;
-        let cols = grid.keys().map(|k| k.1).max().unwrap_or(1).max(1) as f64;
         let mut pos = vec![(DEV_W / 2.0, DEV_H / 2.0); leds];
         for (&(r, c), &i) in grid {
             if i < leds {
-                pos[i] = (c as f64 / cols * DEV_W, r as f64 / rows * DEV_H);
+                pos[i] = ((c as f64 + 0.5) * CELL, (r as f64 + 0.5) * CELL);
             }
         }
         Canvas { pos }
     }
 
-    /// Posizione 0..1 del LED lungo la direzione `angle` attraverso la tela. Gradi come su una
+    /// Distanza con segno del LED dalla retta che passa per `center` perpendicolare a `angle`,
+    /// in frazioni della tela (-0.5..0.5 se il centro e' quello della tela). Gradi come su una
     /// bussola: 0 = verso l'alto, 90 = verso destra (il wave di default di Chroma Studio).
-    fn along(&self, i: usize, angle: f64) -> f64 {
+    fn along(&self, i: usize, angle: f64, center: (f64, f64)) -> f64 {
         let a = angle.to_radians();
         let (dx, dy) = (a.sin(), -a.cos());
         let (x, y) = self.pos[i];
         let span = (DEV_W * dx).abs() + (DEV_H * dy).abs();
-        ((x - DEV_W / 2.0) * dx + (y - DEV_H / 2.0) * dy) / span + 0.5
+        ((x - center.0) * dx + (y - center.1) * dy) / span
+    }
+}
+
+/// Centro di wheel e tidal sulla tela del mouse. Chroma Studio lo salva in px della tela
+/// dell'editor (`centerPointX2/Y2`, 10000x10000) e ci mette accanto la posizione del mouse
+/// (`deviceWithCenterPoint.x/y`); `centerPointX/Y` e' lo stesso punto diviso per 40.
+fn center_point(lp: &Value) -> (f64, f64) {
+    let dev = &lp["deviceWithCenterPoint"];
+    let (Some(dx), Some(dy)) = (dev["x"].as_f64(), dev["y"].as_f64()) else {
+        return (DEV_W / 2.0, DEV_H / 2.0);
+    };
+    let fine = (lp["centerPointX2"].as_f64(), lp["centerPointY2"].as_f64());
+    let coarse = (lp["centerPointX"].as_f64().map(|v| v * CELL), lp["centerPointY"].as_f64().map(|v| v * CELL));
+    match (fine, coarse) {
+        ((Some(x), Some(y)), _) | (_, (Some(x), Some(y))) => (x - dx, y - dy),
+        _ => (DEV_W / 2.0, DEV_H / 2.0),
     }
 }
 
@@ -113,8 +131,16 @@ pub fn stops(p: &Value) -> Option<Stops> {
     Some(list.iter().map(|s| (num(s, "Stop", 0.0), rgb(num(s, "Color", 0.0) as u32))).collect())
 }
 
+/// Quando si ferma un effetto partito con un click (`playbackEnd`).
+#[derive(Clone, Copy, PartialEq)]
+enum End {
+    Never,
+    After(u32), // dopo N cicli (`cycles`)
+    Toggle,     // al click successivo
+}
+
 enum Kind {
-    Static(Rgb),
+    Static(Option<Rgb>), // None = colore vuoto: il layer non copre niente
     /// Tutta la regione dello stesso colore, un giro del gradiente ogni `period` s.
     Spectrum { stops: Stops, period: f64 },
     /// Wave, Tidal e Wheel: il gradiente scorre, `phase` e' la posizione di ogni LED della regione.
@@ -131,8 +157,10 @@ enum Kind {
 
 pub struct Layer {
     pub leds: Vec<usize>,
-    pub on_press: bool, // parte al primo click (per il ripple: un anello per click)
+    pub on_press: bool, // parte con un click (per il ripple: anelli dal centro a ogni click)
+    end: End,
     running: bool,
+    start: f64, // istante del click che l'ha fatto partire: l'animazione riparte da capo
     kind: Kind,
 }
 
@@ -144,10 +172,18 @@ impl Layer {
     /// `name`: nome del layer nei log; `p`: parametri della regione; `lp`: parametri del layer.
     /// None = tipo di layer non supportato.
     pub fn new(name: &str, leds: Vec<usize>, p: &Value, lp: &Value, canvas: &Canvas, rng: &mut Rng) -> Option<Layer> {
-        let on_press = p.get("playbackStart").and_then(Value::as_str) == Some("onPress");
+        // "onSelectedKeys": sul mouse nessun pulsante e' legato a un LED (LedInputMap), quindi
+        // vale qualunque click, come "onPress"
+        let on_press = matches!(p.get("playbackStart").and_then(Value::as_str), Some("onPress" | "onSelectedKeys"));
+        let end = match p.get("playbackEnd").and_then(Value::as_str) {
+            _ if !on_press => End::Never,
+            Some("toggle") => End::Toggle,
+            Some("never") => End::Never,
+            _ => End::After(num(p, "cycles", 1.0).max(1.0) as u32),
+        };
         let mut running = !on_press;
         let kind = match name {
-            "static" => Kind::Static(color(p, "color").unwrap_or(BLACK)),
+            "static" => Kind::Static(color(p, "color").or_else(|| color(p, "color2"))),
             "spectrum" => Kind::Spectrum { stops: stops(p)?, period: num(p, "duration", 37740.0).max(100.0) / 1000.0 },
             "wave" | "tidal" => {
                 let st = match (name, stops(p)) {
@@ -162,7 +198,11 @@ impl Layer {
                     }
                     _ => return None,
                 };
-                let (angle, split) = (num(p, "angle", 90.0), flag(p, "split"));
+                // tidal: default del motore angle 160 e split attivo; l'onda parte dal centro scelto
+                let tidal = name == "tidal";
+                let angle = num(p, "angle", if tidal { 160.0 } else { 90.0 });
+                let split = p.get("split").and_then(Value::as_bool).unwrap_or(tidal);
+                let center = if tidal { center_point(lp) } else { (DEV_W / 2.0, DEV_H / 2.0) };
                 let length = num(p, "width", 100.0).max(1.0) / 100.0; // lunghezze d'onda per tela
                 // `counterclockwise` booleano nella regione (effetti rapidi del mouse) = onda che gira in tondo
                 let spin = p.get("counterclockwise").and_then(Value::as_bool).map(|ccw| if ccw { -1.0 } else { 1.0 });
@@ -174,19 +214,17 @@ impl Layer {
                             let (x, y) = canvas.pos[i];
                             (y - DEV_H / 2.0).atan2(x - DEV_W / 2.0) / TAU * dir
                         } else {
-                            let mut pos = canvas.along(i, angle);
-                            if split {
-                                pos = (pos - 0.5).abs() * 2.0;
-                            }
+                            let d = canvas.along(i, angle, center);
+                            let pos = if split { d.abs() * 2.0 } else { d + 0.5 };
                             if back { -pos } else { pos }
                         };
                         pos / length
                     })
                     .collect();
-                Kind::Scroll { stops: st, phase, hz: num(p, "speed", 25.0) * WAVE_HZ }
+                Kind::Scroll { stops: st, phase, hz: num(p, "speed", if tidal { 10.0 } else { 15.0 }) * WAVE_HZ }
             }
             "wheel" => {
-                let (cx, cy) = (num(lp, "centerPointX", DEV_W / 2.0), num(lp, "centerPointY", DEV_H / 2.0));
+                let (cx, cy) = center_point(lp);
                 let dir = if flag(lp, "counterclockwise") { -1.0 } else { 1.0 };
                 let phase = leds.iter().map(|&i| (canvas.pos[i].1 - cy).atan2(canvas.pos[i].0 - cx) / TAU).collect();
                 Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) * WHEEL_DEG_S / 360.0 * dir }
@@ -198,7 +236,7 @@ impl Layer {
                     speed: num(p, "speed", 10.0).max(1.0) * RIPPLE_PX_S,
                     thick: num(p, "width", 300.0).max(30.0) / 3.0,
                     rings: Vec::new(),
-                    next: 0.0,
+                    next: if on_press { f64::INFINITY } else { 0.0 }, // con un click: niente anelli finche' non si preme
                     all: canvas.pos.clone(),
                     at: leds.iter().map(|&i| canvas.pos[i]).collect(),
                 }
@@ -218,12 +256,14 @@ impl Layer {
             "breathing" => {
                 let rnd = flag(p, "randomColor");
                 let c1 = color(p, "color").unwrap_or(rgb(0x00FF00));
+                // con i colori a caso il motore di Razer dimezza la durata del ciclo
+                let duration = num(p, "duration", 14000.0) / if rnd { 2.0 } else { 1.0 };
                 Kind::Breathing {
                     fixed: if rnd { None } else { stops(p) },
                     c1,
                     c2: color(p, "color2").unwrap_or(c1),
                     rnd,
-                    period: num(p, "duration", 7000.0).max(200.0) / 1000.0,
+                    period: duration.max(200.0) / 1000.0,
                     cycle: -1,
                     stops: Vec::new(),
                 }
@@ -234,13 +274,34 @@ impl Layer {
             }
             _ => return None,
         };
-        Some(Layer { leds, on_press, running, kind })
+        Some(Layer { leds, on_press, end, running, start: 0.0, kind })
     }
 
     pub fn press(&mut self, now: f64) {
+        if let Kind::Ripple { rings, speed, thick, next, .. } = &mut self.kind {
+            match self.end {
+                // toggle: il click accende o spegne l'emissione continua di anelli dal centro
+                End::Toggle => *next = if next.is_finite() { f64::INFINITY } else { now },
+                // un anello dal centro per ciclo, uno dietro l'altro
+                End::After(n) => rings.extend((0..n).map(|k| (now + k as f64 * *thick / *speed, DEV_W / 2.0, DEV_H / 2.0))),
+                End::Never => rings.push((now, DEV_W / 2.0, DEV_H / 2.0)),
+            }
+            return;
+        }
+        if self.end == End::Toggle && self.running {
+            self.running = false;
+            return;
+        }
         self.running = true;
-        if let Kind::Ripple { rings, .. } = &mut self.kind {
-            rings.push((now, DEV_W / 2.0, DEV_H / 2.0));
+        self.start = now;
+    }
+
+    /// Durata di un ciclo, per fermare gli effetti partiti con un click dopo N cicli.
+    fn cycle(&self) -> Option<f64> {
+        match &self.kind {
+            Kind::Scroll { hz, .. } if *hz != 0.0 => Some(1.0 / hz.abs()),
+            Kind::Breathing { period, .. } => Some(*period),
+            _ => None,
         }
     }
 
@@ -249,17 +310,29 @@ impl Layer {
             return;
         }
         let on_press = self.on_press;
+        // partito con un click: l'animazione riparte da capo e si ferma dopo N cicli
+        let t = if on_press { now - self.start } else { now };
+        if let (true, End::After(n), Some(c)) = (on_press, self.end, self.cycle()) {
+            if t >= n as f64 * c {
+                self.running = false;
+                return;
+            }
+        }
         for (n, &i) in self.leds.iter().enumerate() {
             let out: Option<(Rgb, f64)> = match &mut self.kind {
-                Kind::Static(c) => Some((*c, 1.0)),
+                Kind::Static(c) => c.map(|c| (c, 1.0)),
                 Kind::Spectrum { stops, period } => Some((gradient(stops, now.rem_euclid(*period) / *period), 1.0)),
-                Kind::Scroll { stops, phase, hz } => Some((gradient(stops, (phase[n] - now * *hz).rem_euclid(1.0)), 1.0)),
+                Kind::Scroll { stops, phase, hz } => Some((gradient(stops, (phase[n] - t * *hz).rem_euclid(1.0)), 1.0)),
                 Kind::Ripple { stops, speed, thick, rings, next, all, at } => {
                     if n == 0 {
                         if !on_press && now >= *next && !all.is_empty() {
                             let (x, y) = all[((rng.f64() * all.len() as f64) as usize).min(all.len() - 1)];
                             rings.push((now, x, y));
                             *next = now + RIPPLE_EVERY.0 + rng.f64() * (RIPPLE_EVERY.1 - RIPPLE_EVERY.0);
+                        } else if on_press && now >= *next {
+                            // toggle acceso: anelli dal centro uno dietro l'altro
+                            rings.push((now, DEV_W / 2.0, DEV_H / 2.0));
+                            *next = now + *thick / *speed;
                         }
                         let reach = DEV_W.hypot(DEV_H) + *thick;
                         rings.retain(|r| (now - r.0) * *speed < reach);
@@ -297,7 +370,7 @@ impl Layer {
                     })
                 }
                 Kind::Breathing { fixed, c1, c2, rnd, period, cycle, stops } => {
-                    let c = (now / *period) as i64;
+                    let c = (t / *period).floor() as i64;
                     if c != *cycle {
                         *cycle = c;
                         *stops = match fixed {
@@ -306,7 +379,7 @@ impl Layer {
                             None => breathing_stops(*c1, *c2),
                         };
                     }
-                    Some((gradient(stops, (now / *period).rem_euclid(1.0)), 1.0))
+                    Some((gradient(stops, (t / *period).rem_euclid(1.0)), 1.0))
                 }
                 Kind::Fire { stops } => {
                     let f = i as f64;
@@ -317,6 +390,113 @@ impl Layer {
             if let Some((c, a)) = out {
                 frame[i] = if a >= 1.0 { c } else { lerp(frame[i], c, a) };
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn canvas() -> Canvas {
+        Canvas::new(&HashMap::from([((0, 2), 0), ((6, 4), 1)]), 2)
+    }
+
+    fn layer(name: &str, p: Value, lp: Value) -> Layer {
+        Layer::new(name, vec![0, 1], &p, &lp, &canvas(), &mut Rng::new(1)).unwrap()
+    }
+
+    fn lit(l: &mut Layer, now: f64) -> bool {
+        let mut frame = vec![BLACK; 2];
+        l.paint(now, &mut frame, &mut Rng::new(1));
+        frame.iter().any(|&c| c != BLACK)
+    }
+
+    #[test]
+    fn led_al_centro_della_sua_cella() {
+        assert_eq!(canvas().pos, vec![(100.0, 20.0), (180.0, 260.0)]);
+    }
+
+    #[test]
+    fn centro_dai_px_dell_editor_meno_la_posizione_del_mouse() {
+        let dev = json!({"x": 4920, "y": 4840});
+        assert_eq!(center_point(&json!({"centerPointX2": 5068, "centerPointY2": 4976, "deviceWithCenterPoint": dev})), (148.0, 136.0));
+        assert_eq!(center_point(&json!({"centerPointX": 127, "centerPointY": 124, "deviceWithCenterPoint": dev})), (160.0, 120.0));
+        assert_eq!(center_point(&json!({"centerPointX": 127})), (DEV_W / 2.0, DEV_H / 2.0));
+    }
+
+    fn wave(extra: Value) -> Value {
+        let mut p = json!({"speed": 35, "width": 100, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0xFF0000}]});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p
+    }
+
+    #[test]
+    fn dopo_n_cicli_si_ferma() {
+        // speed 35 = un ciclo al secondo (stima WAVE_HZ); 2 cicli dal click a t=10
+        let mut l = layer("wave", wave(json!({"playbackStart": "onPress", "playbackEnd": "after", "cycles": 2})), json!({}));
+        assert!(!lit(&mut l, 5.0), "prima del click non si vede");
+        l.press(10.0);
+        assert!(lit(&mut l, 10.5) && lit(&mut l, 11.9), "acceso per due cicli");
+        assert!(!lit(&mut l, 12.1), "spento dopo il secondo ciclo");
+        l.press(20.0);
+        assert!(lit(&mut l, 20.1), "un nuovo click lo fa ripartire");
+    }
+
+    #[test]
+    fn toggle_acceso_e_spento_dai_click() {
+        let mut l = layer("wave", wave(json!({"playbackStart": "onPress", "playbackEnd": "toggle"})), json!({}));
+        l.press(1.0);
+        assert!(lit(&mut l, 50.0), "resta acceso finche' non si clicca di nuovo");
+        l.press(51.0);
+        assert!(!lit(&mut l, 52.0));
+    }
+
+    #[test]
+    fn on_selected_keys_parte_col_click() {
+        let mut l = layer("wave", wave(json!({"playbackStart": "onSelectedKeys", "playbackEnd": "after", "cycles": 1})), json!({}));
+        assert!(l.on_press && !lit(&mut l, 1.0));
+    }
+
+    #[test]
+    fn random_non_si_ferma_mai() {
+        let mut l = layer("wave", wave(json!({"playbackStart": "random", "playbackEnd": "never", "cycles": -1})), json!({}));
+        assert!(lit(&mut l, 1000.0));
+    }
+
+    #[test]
+    fn static_senza_colore_e_trasparente() {
+        let mut l = layer("static", json!({}), json!({}));
+        let mut frame = vec![(1, 2, 3); 2];
+        l.paint(0.0, &mut frame, &mut Rng::new(1));
+        assert_eq!(frame, vec![(1, 2, 3); 2]);
+        let mut l = layer("static", json!({"color2": 0x0000FF}), json!({}));
+        l.paint(0.0, &mut frame, &mut Rng::new(1));
+        assert_eq!(frame, vec![(0, 0, 255); 2]);
+    }
+
+    #[test]
+    fn breathing_a_caso_dura_la_meta() {
+        let period = |p: Value| match layer("breathing", p, json!({})).kind {
+            Kind::Breathing { period, .. } => period,
+            _ => unreachable!(),
+        };
+        assert_eq!(period(json!({"duration": 14000})), 14.0);
+        assert_eq!(period(json!({"duration": 14000, "randomColor": true})), 7.0);
+        assert_eq!(period(json!({})), 14.0);
+    }
+
+    #[test]
+    fn ripple_con_click_niente_anelli_prima_del_click() {
+        let p = json!({"speed": 10, "width": 300, "playbackStart": "onPress", "playbackEnd": "after", "cycles": 3,
+                       "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0xFF0000}]});
+        let mut l = layer("ripple", p, json!({}));
+        assert!(!lit(&mut l, 30.0));
+        l.press(31.0);
+        match &l.kind {
+            Kind::Ripple { rings, .. } => assert_eq!(rings.len(), 3, "un anello per ciclo"),
+            _ => unreachable!(),
         }
     }
 }

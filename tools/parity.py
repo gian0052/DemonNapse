@@ -4,6 +4,10 @@ Uso:  python tools/parity.py            (dopo `cargo build --release`)
 
 Solo i layer deterministici: ripple, starlight e i colori a caso usano generatori diversi
 nei due linguaggi e non possono coincidere. Tolleranza di 1 su 255 per gli arrotondamenti.
+
+Dopo il port il Rust e' andato avanti da solo (posizione dei LED, centro di wheel e tidal,
+playback): i layer in CHANGED_AFTER_PORT non si confrontano piu' con il Python, li coprono i
+test in Rust (`cargo test`).
 """
 import json
 import logging
@@ -16,9 +20,11 @@ logging.basicConfig(level=logging.ERROR)
 import chroma_layers as cl
 import demonnapse as d
 
-EXE = os.path.join(d.HERE, "target", "release", "demonnapse.exe")
+# DEMONNAPSE_EXE: un altro eseguibile, es. compilato con --target-dir mentre il demone installato gira
+EXE = os.environ.get("DEMONNAPSE_EXE") or os.path.join(d.HERE, "target", "release", "demonnapse.exe")
 T0, FRAMES, FPS = 1234.5, 600, 30
 RANDOM_LAYERS = {"ripple", "starlight"}
+CHANGED_AFTER_PORT = {"wave", "wheel", "tidal", "ripple"}  # la posizione dei LED e' cambiata
 
 
 class Silent:
@@ -55,6 +61,9 @@ def main():
         label = "%-24s %-10s" % (title, layer or "(intero)")
         if names & RANDOM_LAYERS or rnd:
             print(label, "saltato (contiene casualita')")
+            continue
+        if names & CHANGED_AFTER_PORT:
+            print(label, "saltato (cambiato dopo il port: vedi cargo test)")
             continue
         py = python_frames(spec, cfg)
         rs = rust_frames(title, ["--layer", layer, "--all"] if layer else [])
