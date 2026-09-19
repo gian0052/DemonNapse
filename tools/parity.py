@@ -24,7 +24,7 @@ import demonnapse as d
 EXE = os.environ.get("DEMONNAPSE_EXE") or os.path.join(d.HERE, "target", "release", "demonnapse.exe")
 T0, FRAMES, FPS = 1234.5, 600, 30
 RANDOM_LAYERS = {"ripple", "starlight"}
-CHANGED_AFTER_PORT = {"wave", "wheel", "tidal", "ripple"}  # la posizione dei LED e' cambiata
+CHANGED_AFTER_PORT = {"wave", "wheel", "tidal", "ripple", "fire", "starlight"}  # rifatti sulle misure di Razer
 
 
 class Silent:

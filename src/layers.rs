@@ -4,10 +4,9 @@
 //! layer sotto). Audio Meter e Reactive stanno in `effect.rs` perche' dipendono dal meter e
 //! dai click.
 //!
-//! La forma di ogni effetto segue il modo in cui Chroma Studio lo descrive al suo motore
-//! (gradiente, durata, larghezza, velocita', densita'). Le velocita' di wave, tidal e wheel sono
-//! misurate sull'anteprima di Chroma Studio (frame del motore di Razer, 2026-09-19); quelle di
-//! ripple e starlight restano stime.
+//! Tutto quello che segue e' misurato sull'anteprima di Chroma Studio, che mostra i frame del
+//! motore di Razer (2026-09-19): velocita', geometria, forma nel tempo. Le poche stime rimaste
+//! sono segnate come tali.
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -20,18 +19,36 @@ pub const BLACK: Rgb = (0, 0, 0);
 const DEV_W: f64 = 200.0; // tela del dispositivo in Chroma Studio (px)
 const DEV_H: f64 = 320.0;
 const CELL: f64 = 40.0; // lato di una cella della griglia dei LED sulla tela dell'editor (px)
+// Il motore toglie 2 righe al centro di wheel e tidal (`recalculateCenterPos`, attivo di default):
+// misurato, il centro del mouse finisce alla riga 2 invece che alla 4.
+const CENTER_ROW_SHIFT: f64 = 2.0;
 
-// Misurati: il wave avanza a scatti di 40 ms e con larghezza 100% un LED ripete il gradiente ogni
+// Wave: il motore avanza a scatti di 40 ms e con larghezza 100% un LED ripete il gradiente ogni
 // floor(625 / speed) scatti (speed 10 -> 2,48 s, 15 -> 1,64 s, 25 -> 1,00 s, 50 -> 0,48 s); il
 // periodo cresce in proporzione alla larghezza e non dipende da angolo e split.
 const WAVE_TICK: f64 = 0.04;
 const WAVE_TICKS: f64 = 625.0;
-const TIDAL_PERIOD: f64 = 50.0; // s * speed: tidal a speed 15 -> 3,33 s (misurato)
-// wheel: "speed" = gradi al secondo (speed 60 -> un giro in 6 s, 120 -> 3 s, misurato)
-const RIPPLE_PX_S: f64 = 30.0; // px al secondo per unita' di "speed"
-const RIPPLE_EVERY: (f64, f64) = (0.8, 2.5); // s tra due onde quando playbackStart = "random"
-const STAR_MAX_DENSITY: f64 = 10.0; // "density" 10 = tutti i LED della regione accesi insieme
-const STAR_REGEN: f64 = 3.0; // nuove stelle al secondo per LED spento, a density massima
+const TIDAL_PERIOD: f64 = 50.0; // s * speed: speed 10 -> 5,0 s, 15 -> 3,33 s, 30 -> 1,66 s
+// Wheel: "speed" = gradi al secondo (60 -> un giro in 6 s, 120 -> 3 s).
+// Ripple: un anello dal centro della regione ogni (19,6 + 0,02 * width) / speed + 0,08 s; il fronte
+// avanza di 1,3 * speed celle al secondo, spesso 1 + width/100 celle; ogni LED si accende alla
+// sua distanza dal centro arrotondata alla cella. La parte di gradiente visibile nell'anello
+// (dal 25% al 60%) e la sfumatura ai bordi (20%) sono ricavate con un fit: stima.
+const RIPPLE_PERIOD: (f64, f64, f64) = (19.6, 0.02, 0.08);
+const RIPPLE_CELLS_S: f64 = 1.3;
+const RIPPLE_GRADIENT: (f64, f64) = (0.25, 0.60);
+const RIPPLE_EDGE: f64 = 0.2;
+// Starlight: al massimo density*10% dei LED accesi; nascono circa 6/durata stelle al secondo;
+// ogni stella vive tra il 20% e il 100% della durata con una luce casuale fissa (20..87%).
+const STAR_SPAWN: f64 = 6.0;
+const STAR_LIFE_MIN: f64 = 0.2;
+const STAR_LIGHT: (f64, f64) = (0.2, 0.87);
+// Fire: ogni LED ha una tinta fissa (un quarto, meta', tre quarti o tutto color2) e un'intensita'
+// che tremola per conto suo (circa ogni 0,25 s) attorno a una media che cala salendo dal fondo
+// della regione (riga piu' bassa = retro del mouse) verso l'alto.
+const FIRE_STEP: f64 = 0.25;
+const FIRE_HEAT: [(f64, f64); 7] = [(0.0, 0.48), (1.0 / 6.0, 0.44), (1.0 / 3.0, 0.42), (0.5, 0.22), (2.0 / 3.0, 0.15), (5.0 / 6.0, 0.03), (1.0, 0.03)];
+const FIRE_MAX: f64 = 0.85;
 
 pub fn rgb(c: u32) -> Rgb {
     (((c >> 16) & 255) as u8, ((c >> 8) & 255) as u8, (c & 255) as u8)
@@ -40,6 +57,10 @@ pub fn rgb(c: u32) -> Rgb {
 pub fn lerp(a: Rgb, b: Rgb, t: f64) -> Rgb {
     let ch = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * t) as i64 as u8;
     (ch(a.0, b.0), ch(a.1, b.1), ch(a.2, b.2))
+}
+
+fn dim(c: Rgb, k: f64) -> Rgb {
+    lerp(BLACK, c, k)
 }
 
 /// stops: [(0..100, rgb)], pos: 0..1
@@ -52,6 +73,17 @@ pub fn gradient(stops: &[(f64, Rgb)], pos: f64) -> Rgb {
         }
     }
     stops.last().map(|s| s.1).unwrap_or(BLACK)
+}
+
+/// Interpolazione lineare in una tabella [(x, y)] ordinata per x.
+fn table(t: &[(f64, f64)], x: f64) -> f64 {
+    for w in t.windows(2) {
+        if x <= w[1].0 {
+            let k = if w[1].0 > w[0].0 { ((x - w[0].0) / (w[1].0 - w[0].0)).max(0.0) } else { 0.0 };
+            return w[0].1 + (w[1].1 - w[0].1) * k;
+        }
+    }
+    t.last().map_or(0.0, |v| v.1)
 }
 
 /// Generatore xorshift: basta e avanza per stelle e onde a caso, senza dipendenze.
@@ -67,16 +99,23 @@ impl Rng {
         self.0 ^= self.0 << 17;
         (self.0 >> 11) as f64 / (1u64 << 53) as f64
     }
+    /// Colore a caso come li sceglie il motore di Razer (misurato su breathing e starlight):
+    /// ogni canale vale 0, 128 o 255, almeno uno 255.
     pub fn color(&mut self) -> Rgb {
-        let wheel = [(0.0, (255, 0, 0)), (33.0, (0, 255, 0)), (66.0, (0, 0, 255)), (100.0, (255, 0, 0))];
-        gradient(&wheel, self.f64())
+        loop {
+            let mut ch = || [0u8, 128, 255][((self.f64() * 3.0) as usize).min(2)];
+            let c = (ch(), ch(), ch());
+            if c.0 == 255 || c.1 == 255 || c.2 == 255 {
+                return c;
+            }
+        }
     }
 }
 
 /// Posizione sulla tela di ogni LED fisico, ricavata dalla griglia di Chroma Studio
 /// ({(riga, colonna): indice LED}). Il motore di Razer lavora sulla griglia dei LED, con celle
-/// da 40 px sulla tela dell'editor (`centerPointX` = px / 40): la tela del mouse, 200x320 px,
-/// e' 5x8 celle, e ogni LED sta al centro della sua cella.
+/// da 40 px sulla tela dell'editor (`centerPointX` = px / 40), e mette ogni LED sull'indice
+/// della sua cella (misurato: il centro del wheel cade esattamente su righe e colonne intere).
 pub struct Canvas {
     pub pos: Vec<(f64, f64)>,
 }
@@ -86,21 +125,18 @@ impl Canvas {
         let mut pos = vec![(DEV_W / 2.0, DEV_H / 2.0); leds];
         for (&(r, c), &i) in grid {
             if i < leds {
-                pos[i] = ((c as f64 + 0.5) * CELL, (r as f64 + 0.5) * CELL);
+                pos[i] = (c as f64 * CELL, r as f64 * CELL);
             }
         }
         Canvas { pos }
     }
 
-    /// Distanza con segno del LED dalla retta che passa per `center` perpendicolare a `angle`,
-    /// in frazioni dell'estensione `size` lungo `angle` (-0.5..0.5 dentro il riquadro). Gradi come
-    /// su una bussola: 0 = verso l'alto, 90 = verso destra (il wave di default di Chroma Studio).
-    fn along(&self, i: usize, angle: f64, center: (f64, f64), size: (f64, f64)) -> f64 {
-        let a = angle.to_radians();
-        let (dx, dy) = (a.sin(), -a.cos());
+    /// Posizione del LED rispetto a `center` con ogni asse diviso per la sua estensione in
+    /// `size`: il motore normalizza righe e colonne separatamente (misurato: a 45 gradi un'onda
+    /// avanza di 1/5 * 0,71 per colonna e 1/7 * 0,71 per riga su una regione di 5x7 celle).
+    fn norm(&self, i: usize, center: (f64, f64), size: (f64, f64)) -> (f64, f64) {
         let (x, y) = self.pos[i];
-        let span = (size.0 * dx).abs() + (size.1 * dy).abs();
-        ((x - center.0) * dx + (y - center.1) * dy) / span
+        ((x - center.0) / size.0, (y - center.1) / size.1)
     }
 
     /// Riquadro delle celle dei LED di una regione: centro e dimensioni (px). Il motore di Razer
@@ -118,20 +154,22 @@ impl Canvas {
     }
 }
 
-/// Centro di wheel e tidal sulla tela del mouse. Chroma Studio lo salva in px della tela
-/// dell'editor (`centerPointX2/Y2`, 10000x10000) e ci mette accanto la posizione del mouse
-/// (`deviceWithCenterPoint.x/y`); `centerPointX/Y` e' lo stesso punto diviso per 40.
-fn center_point(lp: &Value) -> (f64, f64) {
+/// Onda lungo `angle` (gradi come su una bussola: 0 = verso l'alto, 90 = verso destra) nelle
+/// coordinate normalizzate di `Canvas::norm`.
+fn along((u, v): (f64, f64), angle: f64) -> f64 {
+    let a = angle.to_radians();
+    u * a.sin() - v * a.cos()
+}
+
+/// Centro di wheel e tidal sulla tela del mouse, come lo usa il motore: `centerPointX/Y` e'
+/// il punto scelto in Chroma Studio in celle da 40 px della tela dell'editor (arrotondato), il
+/// mouse sta a `deviceWithCenterPoint.x/y` px, e il motore toglie 2 righe. None = mancano i dati.
+fn center_point(lp: &Value) -> Option<(f64, f64)> {
     let dev = &lp["deviceWithCenterPoint"];
-    let (Some(dx), Some(dy)) = (dev["x"].as_f64(), dev["y"].as_f64()) else {
-        return (DEV_W / 2.0, DEV_H / 2.0);
-    };
-    let fine = (lp["centerPointX2"].as_f64(), lp["centerPointY2"].as_f64());
-    let coarse = (lp["centerPointX"].as_f64().map(|v| v * CELL), lp["centerPointY"].as_f64().map(|v| v * CELL));
-    match (fine, coarse) {
-        ((Some(x), Some(y)), _) | (_, (Some(x), Some(y))) => (x - dx, y - dy),
-        _ => (DEV_W / 2.0, DEV_H / 2.0),
-    }
+    let (dx, dy) = (dev["x"].as_f64()?, dev["y"].as_f64()?);
+    let cell = |k: &str, k2: &str| lp[k].as_f64().or_else(|| lp[k2].as_f64().map(|v| (v / CELL).round()));
+    let (cx, cy) = (cell("centerPointX", "centerPointX2")?, cell("centerPointY", "centerPointY2")?);
+    Some(((cx - (dx / CELL).round()) * CELL, (cy - (dy / CELL).round() - CENTER_ROW_SHIFT) * CELL))
 }
 
 fn num(p: &Value, key: &str, default: f64) -> f64 {
@@ -159,22 +197,33 @@ enum End {
     Toggle,     // al click successivo
 }
 
+#[derive(Clone, Copy)]
+struct Star {
+    t0: f64,
+    life: f64,
+    light: f64,
+    color: Option<Rgb>, // Some = colore a caso: si accende e si spegne
+}
+
 enum Kind {
     Static(Option<Rgb>), // None = colore vuoto: il layer non copre niente
     /// Tutta la regione dello stesso colore, un giro del gradiente ogni `period` s.
     Spectrum { stops: Stops, period: f64 },
     /// Wave, Tidal e Wheel: il gradiente scorre, `phase` e' la posizione di ogni LED della regione.
     /// `pause`: cicli di buio dopo ogni passaggio (wave). `clear_black`: il nero lascia vedere i
-    /// layer sotto (tidal, misurato).
+    /// layer sotto (tidal).
     Scroll { stops: Stops, phase: Vec<f64>, hz: f64, pause: f64, clear_black: bool },
-    /// Anelli che si allargano da un punto: a caso, oppure a ogni click se onPress.
-    Ripple { stops: Stops, speed: f64, thick: f64, rings: Vec<(f64, f64, f64)>, next: f64, all: Vec<(f64, f64)>, at: Vec<(f64, f64)> },
+    /// Anelli dal centro della regione: `dist` e' la distanza di ogni LED in celle, `rings` gli
+    /// istanti in cui sono partiti, `next` quando parte il prossimo (infinito = aspetta un click).
+    Ripple { stops: Stops, cells_s: f64, thick: f64, period: f64, dist: Vec<f64>, rings: Vec<f64>, next: f64 },
     /// Stelle che nascono a caso: il gradiente e' la vita di una stella, `max` quante insieme.
-    Starlight { stops: Stops, rnd: bool, life: f64, max: usize, rate: f64, stars: Vec<Option<(f64, Option<Rgb>)>>, last: Option<f64> },
-    /// Un ciclo ogni `period` s: buio, respiro di color, buio, respiro di color2, buio.
+    Starlight { stops: Stops, rnd: bool, life: f64, max: usize, rate: f64, stars: Vec<Option<Star>>, last: Option<f64> },
+    /// `rnd`: un respiro per `period` con un colore a caso; altrimenti un ciclo per `period`:
+    /// buio, respiro di color, buio, respiro di color2, buio.
     Breathing { fixed: Option<Stops>, c1: Rgb, c2: Rgb, rnd: bool, period: f64, cycle: i64, stops: Stops },
-    /// Il calore tremola per conto suo su ogni LED: caldo = color, tiepido = color2, freddo = buio.
-    Fire { stops: Stops },
+    /// Colore fisso per LED, intensita' che tremola: `knots` = (valore di prima, valore dopo,
+    /// inizio del tratto) per LED, `heat` = intensita' media per LED.
+    Fire { colors: Vec<Rgb>, heat: Vec<f64>, knots: Vec<(f64, f64, f64)> },
 }
 
 pub struct Layer {
@@ -188,6 +237,11 @@ pub struct Layer {
 
 fn breathing_stops(c1: Rgb, c2: Rgb) -> Stops {
     vec![(0.0, BLACK), (12.0, BLACK), (25.0, c1), (38.0, c1), (50.0, BLACK), (62.0, BLACK), (75.0, c2), (88.0, c2), (100.0, BLACK)]
+}
+
+/// Un solo respiro, con la stessa forma di ognuno dei due del ciclo normale.
+fn one_breath(c: Rgb) -> Stops {
+    vec![(0.0, BLACK), (24.0, BLACK), (50.0, c), (76.0, c), (100.0, BLACK)]
 }
 
 impl Layer {
@@ -204,6 +258,7 @@ impl Layer {
             _ => End::After(num(p, "cycles", 1.0).max(1.0) as u32),
         };
         let mut running = !on_press;
+        let (middle, size) = canvas.region(&leds);
         let kind = match name {
             "static" => Kind::Static(color(p, "color").or_else(|| color(p, "color2"))),
             "spectrum" => Kind::Spectrum { stops: stops(p)?, period: num(p, "duration", 37740.0).max(100.0) / 1000.0 },
@@ -220,12 +275,7 @@ impl Layer {
                     }
                     _ => return None,
                 };
-                // tidal: default del motore angle 160 e split attivo; l'onda parte dal centro scelto
                 let tidal = name == "tidal";
-                let angle = num(p, "angle", if tidal { 160.0 } else { 90.0 });
-                let split = p.get("split").and_then(Value::as_bool).unwrap_or(tidal);
-                let (middle, size) = canvas.region(&leds);
-                let center = if tidal { center_point(lp) } else { middle };
                 let length = num(p, "width", 100.0).max(1.0) / 100.0; // lunghezze d'onda per regione
                 let speed = num(p, "speed", if tidal { 10.0 } else { 15.0 });
                 let period = match (tidal, speed > 0.0) {
@@ -237,17 +287,23 @@ impl Layer {
                 let pause = if tidal { 0.0 } else { num(p, "pause", 0.0).max(0.0) / 1000.0 * hz }; // ms -> cicli
                 // `counterclockwise` booleano nella regione (effetti rapidi del mouse) = onda che gira in tondo
                 let spin = p.get("counterclockwise").and_then(Value::as_bool).map(|ccw| if ccw { -1.0 } else { 1.0 });
-                let back = flag(lp, "counterclockwise") && spin.is_none(); // verso di marcia invertito
                 let phase = leds
                     .iter()
                     .map(|&i| {
                         let pos = if let Some(dir) = spin {
                             let (x, y) = canvas.pos[i];
-                            (y - DEV_H / 2.0).atan2(x - DEV_W / 2.0) / TAU * dir
+                            (y - middle.1).atan2(x - middle.0) / TAU * dir
+                        } else if tidal {
+                            // tidal (misurato): sempre specchiato attorno al centro scelto, con la
+                            // direzione ruotata di 90 gradi rispetto all'angolo; Outward si allontana
+                            // dal centro, Inward (`counterclockwise`) ci torna
+                            let center = center_point(lp).unwrap_or(middle);
+                            let d = along(canvas.norm(i, center, size), num(p, "angle", 160.0) - 90.0).abs();
+                            if flag(lp, "counterclockwise") { -d } else { d }
                         } else {
-                            let d = canvas.along(i, angle, center, size);
-                            let pos = if split { d.abs() * 2.0 } else { d + 0.5 };
-                            if back { -pos } else { pos }
+                            // wave: con split le due meta' partono dal centro della regione
+                            let d = along(canvas.norm(i, middle, size), num(p, "angle", 90.0));
+                            if flag(p, "split") { d.abs() } else { d + 0.5 }
                         };
                         pos / length
                     })
@@ -255,31 +311,34 @@ impl Layer {
                 Kind::Scroll { stops: st, phase, hz, pause, clear_black: tidal }
             }
             "wheel" => {
-                let (cx, cy) = center_point(lp);
+                let (cx, cy) = center_point(lp).unwrap_or(middle);
                 let dir = if flag(lp, "counterclockwise") { -1.0 } else { 1.0 };
                 let phase = leds.iter().map(|&i| (canvas.pos[i].1 - cy).atan2(canvas.pos[i].0 - cx) / TAU).collect();
                 Kind::Scroll { stops: stops(p)?, phase, hz: num(p, "speed", 60.0) / 360.0 * dir, pause: 0.0, clear_black: false }
             }
             "ripple" => {
                 running = true;
+                let (speed, width) = (num(p, "speed", 10.0).max(1.0), num(p, "width", 300.0).max(1.0));
+                let dist = leds.iter().map(|&i| ((canvas.pos[i].0 - middle.0) / CELL).hypot((canvas.pos[i].1 - middle.1) / CELL).round()).collect();
                 Kind::Ripple {
                     stops: stops(p)?,
-                    speed: num(p, "speed", 10.0).max(1.0) * RIPPLE_PX_S,
-                    thick: num(p, "width", 300.0).max(30.0) / 3.0,
+                    cells_s: RIPPLE_CELLS_S * speed,
+                    thick: 1.0 + width / 100.0,
+                    period: (RIPPLE_PERIOD.0 + RIPPLE_PERIOD.1 * width) / speed + RIPPLE_PERIOD.2,
+                    dist,
                     rings: Vec::new(),
                     next: if on_press { f64::INFINITY } else { 0.0 }, // con un click: niente anelli finche' non si preme
-                    all: canvas.pos.clone(),
-                    at: leds.iter().map(|&i| canvas.pos[i]).collect(),
                 }
             }
             "starlight" => {
-                let dens = num(p, "density", 1.0).clamp(0.0, STAR_MAX_DENSITY) / STAR_MAX_DENSITY;
+                let dens = num(p, "density", 1.0).clamp(0.0, 10.0);
+                let life = num(p, "duration", 1700.0).max(100.0) / 1000.0;
                 Kind::Starlight {
                     stops: stops(p)?,
                     rnd: flag(p, "randomColor"),
-                    life: num(p, "duration", 1700.0).max(100.0) / 1000.0,
-                    max: if dens > 0.0 { ((leds.len() as f64 * dens).round() as usize).max(1) } else { 0 },
-                    rate: dens * STAR_REGEN,
+                    life,
+                    max: if dens > 0.0 { ((leds.len() as f64 * dens / 10.0).round() as usize).max(1) } else { 0 },
+                    rate: STAR_SPAWN / life,
                     stars: vec![None; leds.len()],
                     last: None,
                 }
@@ -287,7 +346,8 @@ impl Layer {
             "breathing" => {
                 let rnd = flag(p, "randomColor");
                 let c1 = color(p, "color").unwrap_or(rgb(0x00FF00));
-                // con i colori a caso il motore di Razer dimezza la durata del ciclo
+                // con i colori a caso il motore dimezza la durata: un respiro per mezza durata,
+                // ognuno di un colore nuovo (misurato: stesso ritmo di respiro del ciclo normale)
                 let duration = num(p, "duration", 14000.0) / if rnd { 2.0 } else { 1.0 };
                 Kind::Breathing {
                     fixed: if rnd { None } else { stops(p) },
@@ -301,7 +361,14 @@ impl Layer {
             }
             "fire" => {
                 let c1 = color(p, "color").unwrap_or(rgb(0xFF0000));
-                Kind::Fire { stops: vec![(0.0, c1), (50.0, color(p, "color2").unwrap_or(c1)), (100.0, BLACK)] }
+                let c2 = color(p, "color2").unwrap_or(c1);
+                let (top, bottom) = (middle.1 - size.1 / 2.0 + CELL / 2.0, middle.1 + size.1 / 2.0 - CELL / 2.0);
+                let colors = leds.iter().map(|_| lerp(c1, c2, (1.0 + (rng.f64() * 4.0).floor().min(3.0)) / 4.0)).collect();
+                let heat = leds
+                    .iter()
+                    .map(|&i| table(&FIRE_HEAT, if bottom > top { (bottom - canvas.pos[i].1) / (bottom - top) } else { 0.0 }))
+                    .collect();
+                Kind::Fire { colors, heat, knots: vec![(0.0, 0.0, f64::NEG_INFINITY); leds.len()] }
             }
             _ => return None,
         };
@@ -309,13 +376,13 @@ impl Layer {
     }
 
     pub fn press(&mut self, now: f64) {
-        if let Kind::Ripple { rings, speed, thick, next, .. } = &mut self.kind {
+        if let Kind::Ripple { rings, period, next, .. } = &mut self.kind {
             match self.end {
-                // toggle: il click accende o spegne l'emissione continua di anelli dal centro
+                // toggle: il click accende o spegne l'emissione di anelli
                 End::Toggle => *next = if next.is_finite() { f64::INFINITY } else { now },
-                // un anello dal centro per ciclo, uno dietro l'altro
-                End::After(n) => rings.extend((0..n).map(|k| (now + k as f64 * *thick / *speed, DEV_W / 2.0, DEV_H / 2.0))),
-                End::Never => rings.push((now, DEV_W / 2.0, DEV_H / 2.0)),
+                // un anello per ciclo, uno ogni periodo
+                End::After(n) => rings.extend((0..n).map(|k| now + k as f64 * *period)),
+                End::Never => rings.push(now),
             }
             return;
         }
@@ -360,49 +427,56 @@ impl Layer {
                     let c = gradient(stops, (-u).rem_euclid(1.0));
                     (u < 1.0 && !(*clear_black && c == BLACK)).then_some((c, 1.0))
                 }
-                Kind::Ripple { stops, speed, thick, rings, next, all, at } => {
+                Kind::Ripple { stops, cells_s, thick, period, dist, rings, next } => {
+                    let near = dist.iter().cloned().fold(f64::INFINITY, f64::min);
                     if n == 0 {
-                        if !on_press && now >= *next && !all.is_empty() {
-                            let (x, y) = all[((rng.f64() * all.len() as f64) as usize).min(all.len() - 1)];
-                            rings.push((now, x, y));
-                            *next = now + RIPPLE_EVERY.0 + rng.f64() * (RIPPLE_EVERY.1 - RIPPLE_EVERY.0);
-                        } else if on_press && now >= *next {
-                            // toggle acceso: anelli dal centro uno dietro l'altro
-                            rings.push((now, DEV_W / 2.0, DEV_H / 2.0));
-                            *next = now + *thick / *speed;
+                        if now >= *next {
+                            rings.push(now);
+                            *next = now + *period;
                         }
-                        let reach = DEV_W.hypot(DEV_H) + *thick;
-                        rings.retain(|r| (now - r.0) * *speed < reach);
+                        let far = dist.iter().cloned().fold(0.0, f64::max);
+                        rings.retain(|&t0| near + (now - t0) * *cells_s - far < *thick);
                     }
-                    let (x, y) = at[n];
+                    // il fronte nasce sul LED piu' vicino al centro e si allarga
                     let mut best: Option<f64> = None;
-                    for &(t0, rx, ry) in rings.iter() {
-                        let k = ((now - t0) * *speed - (x - rx).hypot(y - ry)) / *thick; // 0 = fronte, 1 = coda
-                        if (0.0..=1.0).contains(&k) && best.map_or(true, |b| k < b) {
+                    for &t0 in rings.iter().filter(|&&t0| t0 <= now) {
+                        let k = (near + (now - t0) * *cells_s - dist[n]) / *thick; // 0 = fronte, 1 = coda
+                        if (0.0..1.0).contains(&k) && best.map_or(true, |b| k < b) {
                             best = Some(k);
                         }
                     }
-                    best.map(|k| (gradient(stops, k), 1.0 - k))
+                    best.map(|k| {
+                        let c = gradient(stops, RIPPLE_GRADIENT.0 + (RIPPLE_GRADIENT.1 - RIPPLE_GRADIENT.0) * k);
+                        (c, (k / RIPPLE_EDGE).min((1.0 - k) / RIPPLE_EDGE).min(1.0))
+                    })
                 }
                 Kind::Starlight { stops, rnd, life, max, rate, stars, last } => {
                     if n == 0 {
                         let dt = last.map_or(0.0, |l| (now - l).min(0.5));
                         *last = Some(now);
-                        for s in 0..stars.len() {
-                            if matches!(stars[s], Some((t0, _)) if now - t0 >= *life) {
-                                stars[s] = None;
-                            }
-                            let lit = stars.iter().filter(|x| x.is_some()).count();
-                            if stars[s].is_none() && lit < *max && rng.f64() < *rate * dt {
-                                stars[s] = Some((now, if *rnd { Some(rng.color()) } else { None }));
+                        for s in stars.iter_mut() {
+                            if matches!(s, Some(st) if now - st.t0 >= st.life) {
+                                *s = None;
                             }
                         }
+                        let lit = stars.iter().filter(|x| x.is_some()).count();
+                        if lit < *max && rng.f64() < *rate * dt {
+                            let free: Vec<usize> = (0..stars.len()).filter(|&s| stars[s].is_none()).collect();
+                            let s = free[((rng.f64() * free.len() as f64) as usize).min(free.len() - 1)];
+                            stars[s] = Some(Star {
+                                t0: now,
+                                life: *life * (STAR_LIFE_MIN + (1.0 - STAR_LIFE_MIN) * rng.f64()),
+                                light: STAR_LIGHT.0 + (STAR_LIGHT.1 - STAR_LIGHT.0) * rng.f64(),
+                                color: if *rnd { Some(rng.color()) } else { None },
+                            });
+                        }
                     }
-                    stars[n].map(|(t0, fixed)| {
-                        let k = (now - t0) / *life;
-                        match fixed {
-                            Some(c) => (c, 1.0 - (2.0 * k - 1.0).abs()), // colore a caso: si accende e si spegne
-                            None => (gradient(stops, k), (k / 0.15).min((1.0 - k) / 0.15).min(1.0)),
+                    stars[n].map(|st| {
+                        let k = (now - st.t0) / st.life;
+                        match st.color {
+                            // colore a caso: la luce sale e scende; altrimenti scorre il gradiente a luce fissa
+                            Some(c) => (dim(c, st.light * (1.0 - (2.0 * k - 1.0).abs())), 1.0),
+                            None => (dim(gradient(stops, k), st.light), 1.0),
                         }
                     })
                 }
@@ -412,16 +486,24 @@ impl Layer {
                         *cycle = c;
                         *stops = match fixed {
                             Some(s) => s.clone(),
-                            None if *rnd => breathing_stops(rng.color(), rng.color()),
+                            None if *rnd => one_breath(rng.color()),
                             None => breathing_stops(*c1, *c2),
                         };
                     }
                     Some((gradient(stops, (t / *period).rem_euclid(1.0)), 1.0))
                 }
-                Kind::Fire { stops } => {
-                    let f = i as f64;
-                    let heat = ((now * 7.3 + f * 1.7).sin() + (now * 12.1 + f * 2.9).sin() + (now * 3.7 + f * 5.3).sin()) / 6.0 + 0.5;
-                    Some((gradient(stops, (1.0 - heat) * 0.8), 1.0)) // 0.8: la fiamma non si spegne mai del tutto
+                Kind::Fire { colors, heat, knots } => {
+                    let (from, to, t0) = &mut knots[n];
+                    if now - *t0 >= FIRE_STEP {
+                        // nuovo tratto: parte da dov'era e va verso un valore a caso attorno alla media
+                        let at = if t0.is_finite() { *to } else { heat[n] };
+                        *from = at;
+                        *to = (heat[n] * (0.2 + 1.6 * rng.f64())).min(FIRE_MAX);
+                        *t0 = if t0.is_finite() && now - *t0 < 2.0 * FIRE_STEP { *t0 + FIRE_STEP } else { now };
+                    }
+                    let k = ((now - *t0) / FIRE_STEP).clamp(0.0, 1.0);
+                    let s = (1.0 - (k * std::f64::consts::PI).cos()) / 2.0; // raccordo morbido
+                    Some((dim(colors[n], *from + (*to - *from) * s), 1.0))
                 }
             };
             if let Some((c, a)) = out {
@@ -451,16 +533,91 @@ mod tests {
     }
 
     #[test]
-    fn led_al_centro_della_sua_cella() {
-        assert_eq!(canvas().pos, vec![(100.0, 20.0), (180.0, 260.0)]);
+    fn led_sull_indice_della_sua_cella() {
+        assert_eq!(canvas().pos, vec![(80.0, 0.0), (160.0, 240.0)]);
     }
 
     #[test]
-    fn centro_dai_px_dell_editor_meno_la_posizione_del_mouse() {
+    fn centro_in_celle_dell_editor_meno_il_mouse_e_due_righe() {
         let dev = json!({"x": 4920, "y": 4840});
-        assert_eq!(center_point(&json!({"centerPointX2": 5068, "centerPointY2": 4976, "deviceWithCenterPoint": dev})), (148.0, 136.0));
-        assert_eq!(center_point(&json!({"centerPointX": 127, "centerPointY": 124, "deviceWithCenterPoint": dev})), (160.0, 120.0));
-        assert_eq!(center_point(&json!({"centerPointX": 127})), (DEV_W / 2.0, DEV_H / 2.0));
+        // centro del mouse scelto in Chroma Studio: misurato colonna 3, riga 2
+        assert_eq!(center_point(&json!({"centerPointX": 126, "centerPointY": 125, "deviceWithCenterPoint": dev})), Some((120.0, 80.0)));
+        assert_eq!(center_point(&json!({"centerPointX2": 5068, "centerPointY2": 4976, "deviceWithCenterPoint": dev})), Some((160.0, 40.0)));
+        assert_eq!(center_point(&json!({"centerPointX": 127})), None);
+    }
+
+    /// Tutti gli 11 LED del Basilisk V3 35K, nell'ordine dello SVG di Chroma Studio.
+    const ALL: [(i64, i64); 11] = [(0, 2), (5, 2), (1, 0), (2, 0), (3, 0), (4, 0), (6, 0), (6, 4), (4, 4), (2, 4), (0, 4)];
+
+    /// Fasi dei LED di un layer steso su tutto il mouse.
+    fn phases(name: &str, p: Value, lp: Value) -> Vec<f64> {
+        let grid: HashMap<(i64, i64), usize> = ALL.iter().enumerate().map(|(n, &rc)| (rc, n)).collect();
+        let canvas = Canvas::new(&grid, ALL.len());
+        let l = Layer::new(name, (0..ALL.len()).collect(), &p, &lp, &canvas, &mut Rng::new(1)).unwrap();
+        let Kind::Scroll { phase, .. } = l.kind else { unreachable!() };
+        phase
+    }
+
+    /// Confronta con i ritardi misurati su Razer (in periodi, rispetto al LED 1,0), a meno di
+    /// un giro intero e con la tolleranza degli scatti da 40 ms.
+    fn same_lags(phase: &[f64], measured: [f64; 11], tol: f64) {
+        for n in 0..11 {
+            let d = (phase[n] - phase[2] - measured[n]).rem_euclid(1.0);
+            assert!(d.min(1.0 - d) < tol, "LED {:?}: fase {} invece di {}", ALL[n], (phase[n] - phase[2]).rem_euclid(1.0), measured[n]);
+        }
+    }
+
+    fn center_lp(ccw: bool) -> Value {
+        json!({"centerPointX": 126, "centerPointY": 125, "counterclockwise": ccw, "deviceWithCenterPoint": {"x": 4920, "y": 4840}})
+    }
+
+    #[test]
+    fn geometria_misurata_su_razer() {
+        let st = json!([{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0x0000FF}]);
+        let wave = |angle: f64, split: bool| phases("wave", json!({"speed": 15, "width": 100, "angle": angle, "split": split, "colorStops": st}), json!({}));
+        same_lags(&wave(90.0, false), [0.388, 0.388, 0.0, 0.0, 0.0, 0.0, 0.0, 0.783, 0.783, 0.783, 0.783], 0.03);
+        same_lags(&wave(0.0, false), [0.122, 0.415, 0.0, 0.856, 0.707, 0.563, 0.266, 0.266, 0.563, 0.856, 0.122], 0.03);
+        same_lags(&wave(45.0, false), [0.366, 0.876, 0.0, 0.902, 0.805, 0.707, 0.510, 0.076, 0.244, 0.441, 0.659], 0.03);
+        same_lags(&wave(90.0, true), [0.610, 0.610, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 0.03);
+        let wheel = |ccw: bool| phases("wheel", json!({"speed": 60, "colorStops": st}), center_lp(ccw));
+        same_lags(&wheel(false), [0.125, 0.747, 0.0, 0.947, 0.899, 0.855, 0.800, 0.660, 0.625, 0.448, 0.273], 0.02);
+        let tidal = |angle: f64, split: bool, ccw: bool| {
+            phases("tidal", json!({"speed": 15, "color": 0x00FF00, "color2": 0x0000FF, "angle": angle, "split": split}), center_lp(ccw))
+        };
+        same_lags(&tidal(160.0, true, false), [0.578, 0.815, 0.0, 0.048, 0.097, 0.143, 0.251, 0.493, 0.578, 0.671, 0.769], 0.03);
+        same_lags(&tidal(160.0, true, true), [0.421, 0.180, 0.0, 0.948, 0.902, 0.851, 0.745, 0.505, 0.421, 0.324, 0.228], 0.03);
+        same_lags(&tidal(90.0, false, false), [0.143, 0.288, 0.0, 0.866, 0.0, 0.143, 0.430, 0.430, 0.143, 0.866, 0.143], 0.03);
+    }
+
+    #[test]
+    fn colori_a_caso_come_razer() {
+        let mut rng = Rng::new(7);
+        for _ in 0..500 {
+            let c = rng.color();
+            assert!([c.0, c.1, c.2].iter().all(|v| [0, 128, 255].contains(v)) && [c.0, c.1, c.2].contains(&255), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn stelle_come_razer() {
+        let grid: HashMap<(i64, i64), usize> = ALL.iter().enumerate().map(|(n, &rc)| (rc, n)).collect();
+        let canvas = Canvas::new(&grid, 11);
+        let p = json!({"density": 5, "duration": 1700, "colorStops": [{"Stop": 0, "Color": 0xFF0000}, {"Stop": 100, "Color": 0x0000FF}]});
+        let mut l = Layer::new("starlight", (0..11).collect(), &p, &json!({}), &canvas, &mut Rng::new(3)).unwrap();
+        let mut rng = Rng::new(9);
+        let (mut most, mut lit_sum, mut frames) = (0, 0, 0);
+        for k in 0..6000 {
+            let mut frame = vec![BLACK; 11];
+            l.paint(k as f64 / 60.0, &mut frame, &mut rng);
+            let lit = frame.iter().filter(|&&c| c != BLACK).count();
+            most = most.max(lit);
+            lit_sum += lit;
+            frames += 1;
+        }
+        let mean = lit_sum as f64 / frames as f64;
+        // misurato su Razer con densita' 5: mai piu' di 6 su 11, in media 3,2
+        assert!(most <= 6, "massimo {most}");
+        assert!((2.5..4.0).contains(&mean), "media {mean}");
     }
 
     fn wave(extra: Value) -> Value {
@@ -520,7 +677,7 @@ mod tests {
             _ => unreachable!(),
         };
         assert_eq!(period(json!({"duration": 14000})), 14.0);
-        assert_eq!(period(json!({"duration": 14000, "randomColor": true})), 7.0);
+        assert_eq!(period(json!({"duration": 14000, "randomColor": true})), 7.0); // un respiro ogni 7 s
         assert_eq!(period(json!({})), 14.0);
     }
 
