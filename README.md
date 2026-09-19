@@ -42,6 +42,14 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 | RAM (private working set) | ~650 MB + 168 MB | 1.5–2 MB |
 | CPU (60 s with music playing and the Audio Meter driving the LEDs) | — | ~0.3 % of one core |
 | Chroma Studio effect per on-board profile | no | yes |
+| **With an Ambient layer active** (screen capture) | — | **~55 MB** and ~0.3 % more of one core |
+
+> **Ambient Awareness is the one heavy layer.** Reading the screen needs the GPU driver, which
+> adds about 55 MB of private memory while an effect with an Ambient layer is on the mouse. The
+> daemon does not even load the capture code otherwise: `d3d11.dll` and `dxgi.dll` are
+> delay-loaded, so with no profile using Ambient they are never mapped, and switching to a
+> profile without it closes the capture again. If you want the daemon at its lightest, leave
+> Ambient out of your effects.
 
 The daemon was first written in Python (kept in `python/` as the reference implementation:
 15 MB of private memory, ~0.7 % of one core) and then ported to Rust. `tools/parity.py`
@@ -96,7 +104,8 @@ Tidal use the center point you set in Chroma Studio. **Ambient Awareness** reads
 the primary screen like Razer's engine (one pixel per grid cell of the region, the chosen screen
 area, the same blur, every 40 ms) through DXGI Desktop Duplication, and only while the active
 effect has an Ambient layer: then the daemon uses about 55 MB more private memory (the GPU
-driver) and ~0.3 % more of one core; with any other effect nothing is opened and the cost is zero.
+driver) and ~0.3 % more of one core. With any other effect the capture libraries are not even
+loaded and the cost is zero (see the note under [Why](#why)).
 **Chroma Generate** (AI/pattern generator from images and videos) is not supported and will not
 be: it is the opposite of lightweight.
 
