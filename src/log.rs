@@ -1,5 +1,5 @@
-//! Log nel formato del demone Python (`HH:MM:SS messaggio`): su stderr, oppure su file quando
-//! il demone gira senza console.
+//! Log con data e ora (`AAAA-MM-GG HH:MM:SS messaggio`): su stderr, oppure su file quando il
+//! demone gira senza console.
 
 use std::fs::File;
 use std::io::Write;
@@ -21,7 +21,7 @@ fn to_file(path: &Path) {
 
 pub fn write(args: std::fmt::Arguments) {
     let t = unsafe { GetLocalTime() };
-    let line = format!("{:02}:{:02}:{:02} {args}\n", t.wHour, t.wMinute, t.wSecond);
+    let line = format!("{}-{:02}-{:02} {:02}:{:02}:{:02} {args}\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
     match FILE.lock().unwrap().as_mut() {
         Some(f) => drop(f.write_all(line.as_bytes())),
         None => drop(std::io::stderr().write_all(line.as_bytes())),
