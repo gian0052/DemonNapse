@@ -173,6 +173,9 @@ your mouse sends when you press the profile button. Reports and pull requests we
   the same approach as OpenRGB/OpenRazer. Not tested against anti-cheat systems.
 - Every Chroma Studio layer is imported; all of them are rendered except Chroma Generate,
   which is ignored with a warning.
+- **Tidal started by a click** (playback start "on any key pressed") does not match Razer's
+  engine yet: it starts and stops, but the timing of each run differs. A Tidal that always runs
+  is rendered like Razer's.
 
 ## Acknowledgements
 
