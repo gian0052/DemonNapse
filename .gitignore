@@ -1,6 +1,7 @@
 # dati personali generati dal demone (serial number del mouse, nomi profili, GUID)
 chroma_effects_dump*.json
 synapse_profiles.json
+synapse_device.json
 *.log
 *.err
 run.*

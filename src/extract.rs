@@ -1,5 +1,6 @@
-//! Legge dai log di Synapse l'ultima definizione di ogni effetto Chroma Studio e i profili
-//! del mouse con il loro slot onboard. Scrive chroma_effects_dump.json e synapse_profiles.json.
+//! Legge dai log di Synapse l'ultima definizione di ogni effetto Chroma Studio, i profili
+//! del mouse con il loro slot onboard e la mappa dei LED del mouse. Scrive chroma_effects_dump.json,
+//! synapse_profiles.json e synapse_device.json.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 const TITLE_KEY: &str = "\"title\":\"";
 const PROFILE_KEY: &str = "{\"activeProfile\":";
+const DEVICE_KEY: &str = "\"config\":{\"Version\":";
 
 fn logs_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join(r"Razer\RazerAppEngine\User Data\Logs")
@@ -112,6 +114,55 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
     Ok(profiles)
 }
 
+/// Il mouse come lo vede Chroma Studio: numero di LED e griglia "riga,colonna" -> indice LED fisico.
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct DeviceMap {
+    pub leds: usize,
+    pub chroma_grid: BTreeMap<String, usize>,
+}
+
+/// L'ultima scheda del dispositivo `pid` in `txt`. Synapse la scrive come
+/// `"config":{"Version":2,"VID":5426,"PID":203,...,"DeviceMaxRow":1,"DeviceMaxCol":11,...,
+/// "LedMatrix":[{"MatrixPos":[riga,colonna],"DevicePos":[riga,colonna]},...]}`.
+fn device_from(txt: &str, pid: u16) -> Option<DeviceMap> {
+    let mut found = None;
+    let mut from = 0;
+    while let Some(i) = txt[from..].find(DEVICE_KEY) {
+        let at = from + i + "\"config\":".len();
+        from = at;
+        let Some(cfg) = decode_prefix(&txt[at..]) else { continue };
+        if cfg["VID"].as_u64() != Some(crate::razerhid::VID as u64) || cfg["PID"].as_u64() != Some(pid as u64) {
+            continue;
+        }
+        let (rows, cols) = (cfg["DeviceMaxRow"].as_u64().unwrap_or(0) as usize, cfg["DeviceMaxCol"].as_u64().unwrap_or(0) as usize);
+        let leds = rows * cols;
+        let mut grid = BTreeMap::new();
+        for cell in cfg["LedMatrix"].as_array().into_iter().flatten() {
+            let pos = |key: &str| Some((cell[key][0].as_u64()? as usize, cell[key][1].as_u64()? as usize));
+            let (Some((r, c)), Some((dr, dc))) = (pos("MatrixPos"), pos("DevicePos")) else { continue };
+            let led = dr * cols + dc;
+            if led < leds {
+                grid.insert(format!("{r},{c}"), led);
+            }
+        }
+        if !grid.is_empty() {
+            found = Some(DeviceMap { leds, chroma_grid: grid });
+        }
+    }
+    found
+}
+
+/// La mappa dei LED del mouse `pid` dai log di Chroma Studio e del motore luci, scritta anche in
+/// `dir`/synapse_device.json.
+pub fn device(dir: &Path, pid: u16) -> Result<DeviceMap, String> {
+    let map = ["chroma-studio", "lighting-engine"]
+        .iter()
+        .find_map(|prefix| device_from(&read_logs(prefix), pid))
+        .ok_or_else(|| format!("no LED map for the mouse (PID 0x{pid:04X}) in Synapse's logs"))?;
+    write_json(&dir.join("synapse_device.json"), &map)?;
+    Ok(map)
+}
+
 /// Riassunto di un effetto, una riga per regione (come `extract_effects.py`).
 pub fn summary(title: &str, effect: &Value) -> String {
     let mut out = format!("\n== {title}");
@@ -124,4 +175,21 @@ pub fn summary(title: &str, effect: &Value) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_map_from_the_log() {
+        // come la scrive Synapse per il Basilisk V3 35K (ridotta a 3 LED), preceduta da un altro dispositivo
+        let other = r#""config":{"Version":2,"VID":5426,"PID":99,"DeviceMaxRow":1,"DeviceMaxCol":2,"LedMatrix":[{"MatrixPos":[0,0],"DevicePos":[0,0]}]}"#;
+        let mouse = r#""config":{"Version":2,"VID":5426,"PID":203,"EID":0,"MatrixMaxRow":7,"MatrixMaxCol":5,"DeviceMaxRow":1,"DeviceMaxCol":3,"LedMatrix":[{"MatrixPos":[0,2],"DevicePos":[0,1]},{"MatrixPos":[5,2],"DevicePos":[0,0]},{"MatrixPos":[6,4],"DevicePos":[0,2]},{"MatrixPos":[6,0],"DevicePos":[0,7]}]}"#;
+        let map = device_from(&format!("x {mouse} y {other} z"), 203).unwrap();
+        assert_eq!(map.leds, 3);
+        let want: BTreeMap<String, usize> = [("0,2", 1), ("5,2", 0), ("6,4", 2)].iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        assert_eq!(map.chroma_grid, want, "il LED 7 non esiste su un mouse da 3 LED: scartato");
+        assert!(device_from(mouse, 0x00CC).is_none());
+    }
 }

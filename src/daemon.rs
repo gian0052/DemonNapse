@@ -58,11 +58,16 @@ impl ProfileTracker {
     }
 }
 
-/// Effetti e profili dai log di Synapse, scritti in `dir`.
+/// Effetti, profili e mappa dei LED dai log di Synapse, scritti in `dir`. La mappa non blocca il resto:
+/// puo' anche essere scritta a mano in config.json.
 fn extract_all(dir: &Path) -> Result<(), String> {
     let cfg = Config::load(dir)?;
     extract::effects(dir)?;
-    extract::profiles(dir, cfg.pid()).map(drop)
+    extract::profiles(dir, cfg.pid())?;
+    if let Err(e) = extract::device(dir, cfg.pid()) {
+        info!("{e}");
+    }
+    Ok(())
 }
 
 /// Synapse e' aperto: gli lascio il mouse e i servizi, e aspetto.
@@ -84,11 +89,12 @@ fn wait_for_synapse_to_close(dir: &Path) {
 /// Una "sessione" tra un'apertura di Synapse e l'altra. Ritorna Ok quando Synapse compare.
 fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpSocket>, last_error: &mut String) -> Result<(), String> {
     // prima installazione: i file estratti non ci sono ancora, li leggo subito dai log di Synapse
-    if !dir.join("chroma_effects_dump.json").exists() || !dir.join("synapse_profiles.json").exists() {
+    if ["chroma_effects_dump.json", "synapse_profiles.json", "synapse_device.json"].iter().any(|f| !dir.join(f).exists()) {
         extract_all(dir)?;
-        info!("effects and profiles read from Synapse's logs");
+        info!("effects, profiles and LED map read from Synapse's logs");
     }
     let cfg = Config::load(dir)?;
+    cfg.check_device()?;
     let grid = cfg.grid();
     let canvas = Canvas::new(&grid, cfg.device.leds);
     let seed = SystemTime::now().duration_since(UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);

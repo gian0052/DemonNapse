@@ -88,7 +88,8 @@ like Chroma Studio and only want it to stop running all day.
 1. **Synapse stays your editor.** Profiles, key bindings, DPI stages and Chroma Studio effects
    are designed in Synapse/Chroma as usual. Synapse writes all of it to its own log files.
 2. **The daemon reads those logs** (`src/extract.rs`): the layers of every Chroma Studio
-   effect, whatever its type, and the on-board slot of every profile.
+   effect, whatever its type, the on-board slot of every profile and the mouse's LED map (which
+   Chroma Studio grid cell is which physical LED).
 3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
    `DOTA 2` → `Chroma Effect DOTA`. Names are compared word by word (letters and digits only,
    case ignored, a leading `Chroma Effect` does not count); the effect with the most words in
@@ -192,8 +193,8 @@ folder. The extracted files and the log are written in the same folder.
 
 | key | meaning |
 |---|---|
-| `device.pid` / `device.leds` | USB product id and LED count of your mouse |
-| `device.chroma_grid` | Chroma Studio grid position `"row,col"` → physical LED index |
+| `device.pid` | USB product id of your mouse |
+| `device.leds` / `device.chroma_grid` | optional: LED count and Chroma Studio grid position `"row,col"` → physical LED index. Read from Synapse's logs (`synapse_device.json`) when missing; set them only to override |
 | `effect_overrides` | `{"Profile name": "Chroma Effect X"}` when names have nothing in common |
 | `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
 | `fps` | frames per second sent to the mouse (default 60) |
@@ -204,7 +205,7 @@ folder. The extracted files and the log are written in the same folder.
 Verified on the **Razer Basilisk V3 35K (wired, PID `0x00CB`)** only: control interface,
 per-LED protocol, LED map and profile registers were all reverse-engineered and tested on that
 mouse. Other Razer mice speaking the same protocol (most of them, see the OpenRazer wiki) will
-probably work with a different `pid`, `leds` and `chroma_grid`; `tools/sniff.py` (Python, `pip install hidapi`) shows what
+probably work with a different `pid` (the LED count and map come from Synapse's logs); `tools/sniff.py` (Python, `pip install hidapi`) shows what
 your mouse sends when you press the profile button. Reports and pull requests welcome.
 
 ## Things you should know before installing

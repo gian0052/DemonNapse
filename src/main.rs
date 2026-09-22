@@ -133,6 +133,8 @@ saved: {}
     for p in extract::profiles(&out, cfg.pid())? {
         println!("slot {}: {}", p.slot, p.name);
     }
+    let map = extract::device(&out, cfg.pid())?;
+    println!("LED map: {} LEDs, {} grid cells", map.leds, map.chroma_grid.len());
     Ok(())
 }
 
