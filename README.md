@@ -194,7 +194,7 @@ folder. The extracted files and the log are written in the same folder.
 
 | key | meaning |
 |---|---|
-| `device.pid` | USB product id of your mouse |
+| `device.pid` | optional: USB product id of the mouse, e.g. `"0x00CB"`. When missing the daemon uses the connected Razer device that Synapse lists as a mouse (never a keyboard or headset), or the only Razer device connected if Synapse does not know its type; with several candidates it asks you to set it |
 | `device.leds` / `device.chroma_grid` | optional: LED count and Chroma Studio grid position `"row,col"` → physical LED index. Read from Synapse's logs (`synapse_device.json`) when missing; set them only to override |
 | `effect_overrides` | `{"Profile name": "Chroma Effect X"}` when names have nothing in common |
 | `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
@@ -206,8 +206,9 @@ folder. The extracted files and the log are written in the same folder.
 Verified on the **Razer Basilisk V3 35K (wired, PID `0x00CB`)** only: control interface,
 per-LED protocol, LED map and profile registers were all reverse-engineered and tested on that
 mouse. Other wired Razer mice speaking the same protocol (most of them, see the OpenRazer wiki)
-will probably work with their own `pid` in `config.json`: the LED count and map come from
-Synapse's logs, and the report's transaction id (`0x1F`, `0x3F` or `0xFF`) is detected.
+will probably work as they are: the daemon finds the mouse among the connected Razer devices,
+reads its LED count and map from Synapse's logs and detects the report's transaction id (`0x1F`,
+`0x3F` or `0xFF`). A Razer keyboard plugged in next to it is left alone.
 
 **Own a different Razer mouse?** Close Synapse, stop the daemon if it runs
 (`schtasks /End /TN DemonNapse`) and run `demonnapse.exe check` (or `check 0x00XX` for a given

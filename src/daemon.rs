@@ -61,10 +61,10 @@ impl ProfileTracker {
 /// Effetti, profili e mappa dei LED dai log di Synapse, scritti in `dir`. La mappa non blocca il resto:
 /// puo' anche essere scritta a mano in config.json.
 fn extract_all(dir: &Path) -> Result<(), String> {
-    let cfg = Config::load(dir)?;
+    let pid = Config::load(dir)?.mouse()?;
     extract::effects(dir)?;
-    extract::profiles(dir, cfg.pid())?;
-    if let Err(e) = extract::device(dir, cfg.pid()) {
+    extract::profiles(dir, pid)?;
+    if let Err(e) = extract::device(dir, pid) {
         info!("{e}");
     }
     Ok(())
@@ -101,13 +101,17 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
     let mut active: Vec<Active> = profiles::load(dir, &cfg, &grid, &canvas, seed)?;
 
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
-    let (ctl, _) = razerhid::open_control(&mut api, cfg.pid(), CONTROL_RETRIES)?;
+    let pid = cfg.mouse()?;
+    if let Some(Ok((_, how))) = &cfg.detected {
+        info!("mouse: {how}");
+    }
+    let (ctl, _) = razerhid::open_control(&mut api, pid, CONTROL_RETRIES)?;
     // Synapse chiuso di forza lascia il mouse in modo driver: il pulsante dei profili non cambia piu' slot
     if let Some(mode @ 1..) = razerhid::get_device_mode(&ctl) {
         let ok = razerhid::set_device_mode(&ctl, 0);
         info!("mouse in mode {mode} (driver): set back to normal mode{}", if ok { "" } else { " - FAILED" });
     }
-    let events = razerhid::open_events(&api, cfg.pid());
+    let events = razerhid::open_events(&api, pid);
     let now = || clock.elapsed().as_secs_f64();
     let mut tracker = ProfileTracker::new(&ctl, active.iter().map(|a| a.slot).collect(), now());
     info!("active: slot {} -> profile '{}'", active[tracker.idx].slot, active[tracker.idx].name);

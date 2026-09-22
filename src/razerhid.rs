@@ -71,6 +71,19 @@ pub fn open_control(api: &mut HidApi, pid: u16, retries: u32) -> Result<(HidDevi
     Err("no control interface found".into())
 }
 
+/// I dispositivi Razer collegati, uno per PID, con il nome che danno a Windows.
+pub fn connected(api: &HidApi) -> Vec<(u16, String)> {
+    let mut seen: Vec<(u16, String)> = Vec::new();
+    for d in api.device_list().filter(|d| d.vendor_id() == VID) {
+        match seen.iter_mut().find(|(p, _)| *p == d.product_id()) {
+            Some((_, name)) if name.is_empty() => *name = d.product_string().unwrap_or("").to_string(),
+            Some(_) => {}
+            None => seen.push((d.product_id(), d.product_string().unwrap_or("").to_string())),
+        }
+    }
+    seen
+}
+
 /// Le collection da cui arrivano gli eventi "05 xx" (DPI, rotella, cambio profilo).
 pub fn open_events(api: &HidApi, pid: u16) -> Vec<HidDevice> {
     api.device_list()

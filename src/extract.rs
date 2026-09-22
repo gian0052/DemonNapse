@@ -4,12 +4,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 const TITLE_KEY: &str = "\"title\":\"";
 const PROFILE_KEY: &str = "{\"activeProfile\":";
 const DEVICE_KEY: &str = "\"config\":{\"Version\":";
+const CATEGORY_KEY: &str = "\"category\":\"";
 
 fn logs_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join(r"Razer\RazerAppEngine\User Data\Logs")
@@ -114,9 +115,11 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
     Ok(profiles)
 }
 
-/// Il mouse come lo vede Chroma Studio: numero di LED e griglia "riga,colonna" -> indice LED fisico.
+/// Il mouse come lo vede Chroma Studio: PID, numero di LED e griglia "riga,colonna" -> indice LED fisico.
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct DeviceMap {
+    #[serde(default)]
+    pub pid: u16, // per il demone Python, che non cerca il mouse da solo
     pub leds: usize,
     pub chroma_grid: BTreeMap<String, usize>,
 }
@@ -146,7 +149,7 @@ fn device_from(txt: &str, pid: u16) -> Option<DeviceMap> {
             }
         }
         if !grid.is_empty() {
-            found = Some(DeviceMap { leds, chroma_grid: grid });
+            found = Some(DeviceMap { pid, leds, chroma_grid: grid });
         }
     }
     found
@@ -161,6 +164,33 @@ pub fn device(dir: &Path, pid: u16) -> Result<DeviceMap, String> {
         .ok_or_else(|| format!("no LED map for the mouse (PID 0x{pid:04X}) in Synapse's logs"))?;
     write_json(&dir.join("synapse_device.json"), &map)?;
     Ok(map)
+}
+
+/// Il tipo di ogni dispositivo come lo scrive Synapse nella sua scheda
+/// (`{..."productId":203,...,"category":"mouse",...}`), per PID; l'ultima occorrenza vince.
+fn categories_from(txt: &str) -> HashMap<u16, String> {
+    let mut found = HashMap::new();
+    let mut from = 0;
+    while let Some(i) = txt[from..].find(CATEGORY_KEY) {
+        let at = from + i;
+        from = at + CATEGORY_KEY.len();
+        let Some(category) = txt[from..].find('"').map(|n| &txt[from..from + n]) else { break };
+        // il productId sta nello stesso oggetto, prima della categoria
+        let start = txt[..at].rfind('{').unwrap_or(0);
+        let Some(p) = txt[start..at].rfind("\"productId\":") else { continue };
+        let digits: String = txt[start + p + "\"productId\":".len()..at].chars().take_while(char::is_ascii_digit).collect();
+        if let Ok(pid) = digits.parse::<u16>() {
+            found.insert(pid, category.to_string());
+        }
+    }
+    found
+}
+
+/// Il tipo di ogni dispositivo Razer che Synapse conosce ("mouse", "keyboard"...), per PID.
+pub fn categories() -> HashMap<u16, String> {
+    let mut all = categories_from(&read_logs("lighting-engine"));
+    all.extend(categories_from(&read_logs("chroma-studio")));
+    all
 }
 
 /// Riassunto di un effetto, una riga per regione (come `extract_effects.py`).
@@ -191,5 +221,14 @@ mod tests {
         let want: BTreeMap<String, usize> = [("0,2", 1), ("5,2", 0), ("6,4", 2)].iter().map(|(k, v)| (k.to_string(), *v)).collect();
         assert_eq!(map.chroma_grid, want, "il LED 7 non esiste su un mouse da 3 LED: scartato");
         assert!(device_from(mouse, 0x00CC).is_none());
+    }
+
+    #[test]
+    fn categories_from_the_log() {
+        let txt = r#"{"positionRank":4,"productId":203,"instanceId":0,"category":"mouse","productName":"Razer Basilisk V3 35K"} {"productId":655,"layout":1,"category":"keyboard"} {"category":"headset"}"#;
+        let c = categories_from(txt);
+        assert_eq!(c.get(&203).map(String::as_str), Some("mouse"));
+        assert_eq!(c.get(&655).map(String::as_str), Some("keyboard"));
+        assert_eq!(c.len(), 2, "una categoria senza productId non conta");
     }
 }

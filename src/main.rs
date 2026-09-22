@@ -114,11 +114,12 @@ fn render(args: &[String]) -> Result<(), String> {
 fn probe() -> Result<(), String> {
     let cfg = Config::load(&home())?;
     let mut api = hidapi::HidApi::new().map_err(|e| e.to_string())?;
-    let (ctl, resp) = razerhid::open_control(&mut api, cfg.pid(), 2)?;
+    let pid = cfg.mouse()?;
+    let (ctl, resp) = razerhid::open_control(&mut api, pid, 2)?;
     println!("firmware: {}.{}", resp[8], resp[9]);
     println!("active slot: {:?}", razerhid::get_active_profile(&ctl));
     println!("mode: {:?} (0 = normal, 3 = driver)", razerhid::get_device_mode(&ctl));
-    println!("event interfaces: {}", razerhid::open_events(&api, cfg.pid()).len());
+    println!("event interfaces: {}", razerhid::open_events(&api, pid).len());
     Ok(())
 }
 
@@ -132,10 +133,11 @@ fn extract(args: &[String]) -> Result<(), String> {
     println!("
 saved: {}
 ", out.join("chroma_effects_dump.json").display());
-    for p in extract::profiles(&out, cfg.pid())? {
+    let pid = cfg.mouse()?;
+    for p in extract::profiles(&out, pid)? {
         println!("slot {}: {}", p.slot, p.name);
     }
-    let map = extract::device(&out, cfg.pid())?;
+    let map = extract::device(&out, pid)?;
     println!("LED map: {} LEDs, {} grid cells", map.leds, map.chroma_grid.len());
     Ok(())
 }

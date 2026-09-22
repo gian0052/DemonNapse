@@ -57,23 +57,23 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     println!("DemonNapse check {}", env!("CARGO_PKG_VERSION"));
     println!("\n[1] Razer devices connected");
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
-    let mut seen: Vec<(u16, String)> = Vec::new();
-    for d in api.device_list().filter(|d| d.vendor_id() == razerhid::VID) {
-        let name = d.product_string().unwrap_or("").to_string();
-        if !seen.iter().any(|(p, _)| *p == d.product_id()) {
-            seen.push((d.product_id(), name));
-        }
-    }
+    let seen = razerhid::connected(&api);
+    let categories = extract::categories();
     for (pid, name) in &seen {
-        println!("  PID 0x{pid:04X}  {name}");
+        println!("  PID 0x{pid:04X}  {name}  ({})", categories.get(pid).map_or("type unknown to Synapse", String::as_str));
     }
-    let from_config = Config::load(dir).ok().map(|c| c.pid());
+    let cfg = Config::load(dir).ok();
     let pid = match args.first() {
         Some(a) => u16::from_str_radix(a.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| format!("'{a}' is not a PID like 0x00CB"))?,
-        None => from_config.filter(|p| seen.iter().any(|(s, _)| s == p)).or(seen.first().map(|(p, _)| *p)).ok_or("no Razer device connected")?,
+        None => cfg.as_ref().ok_or("config.json not found")?.mouse().map_err(|e| format!("{e} (or run check 0x00XX with the PID above)"))?,
     };
     let name = seen.iter().find(|(p, _)| *p == pid).map_or("", |(_, n)| n.as_str());
-    println!("  checking PID 0x{pid:04X} {name}{}", if from_config == Some(pid) { " (from config.json)" } else { "" });
+    let how = match (args.first(), cfg.as_ref().and_then(|c| c.detected.as_ref())) {
+        (Some(_), _) => "given on the command line",
+        (None, Some(Ok(_))) => "detected",
+        _ => "from config.json",
+    };
+    println!("  checking PID 0x{pid:04X} {name} ({how})");
 
     println!("\n[2] Control interface");
     let (ctl, resp) = razerhid::open_control(&mut api, pid, 2).map_err(|e| format!("{e}: this device does not answer the Razer protocol the way DemonNapse speaks it"))?;

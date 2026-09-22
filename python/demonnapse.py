@@ -251,8 +251,12 @@ def match_effect(profile_name, titles, overrides):
 def load():
     cfg = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
     dev = cfg["device"]
-    if not dev.get("chroma_grid"):  # mappa dei LED letta dai log di Synapse dal demone Rust (synapse_device.json)
-        dev.update(json.load(open(os.path.join(HERE, "synapse_device.json"), encoding="utf-8")))
+    if not dev.get("chroma_grid") or not dev.get("pid"):
+        # mouse e mappa dei LED trovati dal demone Rust nei log di Synapse (synapse_device.json)
+        found = json.load(open(os.path.join(HERE, "synapse_device.json"), encoding="utf-8"))
+        found["pid"] = "0x%04X" % found["pid"]
+        for key in ("pid", "leds", "chroma_grid"):
+            dev[key] = dev.get(key) or found[key]
     rz.configure(int(dev["pid"], 16), dev["leds"])
     GRID.clear()
     GRID.update({(int(k.split(",")[0]), int(k.split(",")[1])): v for k, v in dev["chroma_grid"].items()})

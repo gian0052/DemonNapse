@@ -1,9 +1,7 @@
 {
   "_note": "Profiles and their on-board slots are read from Synapse (synapse_profiles.json). Each profile gets the Chroma effect with the most words in common (e.g. 'CS2' <-> 'Chroma Effect CS2'); effect_overrides forces a match when the names differ, e.g. {\"Profile name\": \"Chroma Effect X\"}. skip_slots: slots to skip (1 = Hybrid Storage, white indicator).",
   "device": {
-    "_note": "USB product id of the mouse (Basilisk V3 35K wired = 0x00CB). The LED count and the Chroma Studio grid are read from Synapse's logs (synapse_device.json); set leds and chroma_grid ({\"row,col\": LED index}) here only to override them.",
-    "name": "Razer Basilisk V3 35K",
-    "pid": "0x00CB"
+    "_note": "Leave pid out and the daemon finds the mouse by itself: the connected Razer device that Synapse lists as a mouse (never a keyboard). With several Razer mice connected, set pid to the USB product id (e.g. \"0x00CB\" for the Basilisk V3 35K; demonnapse.exe check lists them). The LED count and the Chroma Studio grid are read from Synapse's logs (synapse_device.json); set leds and chroma_grid ({\"row,col\": LED index}) here only to override them."
   },
   "effect_overrides": {},
   "skip_slots": [
