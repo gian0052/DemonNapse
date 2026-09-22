@@ -58,7 +58,7 @@ pub fn open_control(api: &mut HidApi, pid: u16, retries: u32) -> Result<(HidDevi
             sleep(Duration::from_secs(1)); // un'altra istanza sta morendo o il mouse e' occupato
         }
     }
-    Err("nessuna interfaccia di controllo trovata".into())
+    Err("no control interface found".into())
 }
 
 /// Le collection da cui arrivano gli eventi "05 xx" (DPI, rotella, cambio profilo).

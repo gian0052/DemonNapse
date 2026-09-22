@@ -47,12 +47,12 @@ pub fn load(dir: &Path, cfg: &Config, grid: &HashMap<(i64, i64), usize>, canvas:
             Some(spec) => {
                 let (fx, unsupported) = Effect::new(spec, cfg, grid, canvas, seed + p.slot as u64);
                 for layer in unsupported {
-                    info!("{}: layer '{layer}' non supportato, ignorato", fx.title);
+                    info!("{}: layer '{layer}' not supported, ignored", fx.title);
                 }
                 fx
             }
             None => {
-                info!("profilo '{}' (slot {}): nessun effetto Chroma abbinato, RGB spento", p.name, p.slot);
+                info!("profile '{}' (slot {}): no matching Chroma effect, RGB off", p.name, p.slot);
                 Effect::off(cfg, canvas)
             }
         };
@@ -60,7 +60,7 @@ pub fn load(dir: &Path, cfg: &Config, grid: &HashMap<(i64, i64), usize>, canvas:
         active.push(Active { slot: p.slot, name: p.name, effect });
     }
     if active.is_empty() {
-        return Err("nessun profilo Synapse trovato: apri Synapse una volta e richiudilo".into());
+        return Err("no Synapse profile found: open Synapse once and close it".into());
     }
     Ok(active)
 }

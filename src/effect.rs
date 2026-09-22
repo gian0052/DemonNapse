@@ -240,7 +240,7 @@ impl Effect {
         for item in self.stack.iter_mut() {
             if let Item::Ambient(a) = item {
                 if a.points(w, h).is_some() {
-                    a.update(it.next().expect("una lettura per ogni Ambient"));
+                    a.update(it.next().expect("one reading per Ambient"));
                 }
             }
         }

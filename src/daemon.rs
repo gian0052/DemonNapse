@@ -42,7 +42,7 @@ impl ProfileTracker {
         let Some(mut slot) = razerhid::get_active_profile(ctl) else { return false };
         if !self.slots.contains(&slot) {
             let next = self.slots.iter().copied().find(|&s| s > slot).unwrap_or(self.slots[0]);
-            info!("slot {slot} non configurato -> salto allo slot {next}");
+            info!("slot {slot} not configured -> jumping to slot {next}");
             razerhid::set_active_profile(ctl, next);
             slot = next;
         }
@@ -67,14 +67,14 @@ fn extract_all(dir: &Path) -> Result<(), String> {
 
 /// Synapse e' aperto: gli lascio il mouse e i servizi, e aspetto.
 fn wait_for_synapse_to_close(dir: &Path) {
-    info!("Synapse aperto: mi metto in pausa");
+    info!("Synapse opened: pausing");
     synapse::services(true);
     while synapse::running() {
         sleep(Duration::from_secs(1));
     }
-    info!("Synapse chiuso: rileggo gli effetti e riprendo");
+    info!("Synapse closed: re-reading effects and resuming");
     if let Err(e) = extract_all(dir) {
-        info!("estrazione effetti fallita, tengo i vecchi: {e}");
+        info!("reading effects failed, keeping the previous ones: {e}");
     }
     sleep(Duration::from_secs(2)); // lascio finire i processi figli di Synapse
     synapse::kill_razer_apps();
@@ -86,7 +86,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
     // prima installazione: i file estratti non ci sono ancora, li leggo subito dai log di Synapse
     if !dir.join("chroma_effects_dump.json").exists() || !dir.join("synapse_profiles.json").exists() {
         extract_all(dir)?;
-        info!("effetti e profili letti dai log di Synapse");
+        info!("effects and profiles read from Synapse's logs");
     }
     let cfg = Config::load(dir)?;
     let grid = cfg.grid();
@@ -99,12 +99,12 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
     // Synapse chiuso di forza lascia il mouse in modo driver: il pulsante dei profili non cambia piu' slot
     if let Some(mode @ 1..) = razerhid::get_device_mode(&ctl) {
         let ok = razerhid::set_device_mode(&ctl, 0);
-        info!("mouse in modo {mode} (driver): rimesso in modo normale{}", if ok { "" } else { " - FALLITO" });
+        info!("mouse in mode {mode} (driver): set back to normal mode{}", if ok { "" } else { " - FAILED" });
     }
     let events = razerhid::open_events(&api, cfg.pid());
     let now = || clock.elapsed().as_secs_f64();
     let mut tracker = ProfileTracker::new(&ctl, active.iter().map(|a| a.slot).collect(), now());
-    info!("attivo: slot {} -> profilo '{}'", active[tracker.idx].slot, active[tracker.idx].name);
+    info!("active: slot {} -> profile '{}'", active[tracker.idx].slot, active[tracker.idx].name);
     last_error.clear();
 
     let mut pressed = [false; VK_BUTTONS.len()];
@@ -131,7 +131,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
             // timeout di 1 ms e non lettura non bloccante: con timeout 0 il backend Windows di hidapi
             // prende ERROR_IO_INCOMPLETE per un errore, abbandona la lettura in corso e perde gli eventi
             while let Ok(n @ 1..) = h.read_timeout(&mut buf, 1) {
-                debug!("evento {}", buf[..n.min(6)].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" "));
+                debug!("event {}", buf[..n.min(6)].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" "));
                 changed |= tracker.feed(&ctl, &buf[..n], t);
             }
         }
@@ -149,7 +149,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         if changed {
             current.effect.clear_flashes();
             last_frame = None;
-            info!("profilo -> '{}' ({})", current.name, current.effect.title);
+            info!("profile -> '{}' ({})", current.name, current.effect.title);
         }
         let fx = &mut current.effect;
 
@@ -167,7 +167,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         let frame = fx.render(t, dt, peak);
         // reinvio solo se cambia; keepalive ogni secondo (il firmware puo' ridisegnare il suo effetto)
         if last_frame.as_ref() != Some(&frame) || t - last_sent > 1.0 {
-            razerhid::custom_frame(&ctl, &frame).map_err(|e| format!("invio al mouse fallito: {e}"))?;
+            razerhid::custom_frame(&ctl, &frame).map_err(|e| format!("sending to the mouse failed: {e}"))?;
             if let Some(wall) = wall {
                 let bytes: Vec<u8> = frame.iter().flat_map(|c| [c.0, c.1, c.2]).collect();
                 let _ = wall.send_to(&bytes, WALL_ADDR);
@@ -184,11 +184,11 @@ pub fn run(dir: &Path) {
     // una sola istanza: due demoni sullo stesso mouse si pestano i piedi
     let mutex = unsafe { CreateMutexW(None, true, w!("Local\\demonnapse")) };
     if mutex.is_err() || unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-        info!("DemonNapse e' gia' in esecuzione, esco");
+        info!("DemonNapse is already running, exiting");
         return;
     }
 
-    info!("avvio: pulizia processi e servizi Razer");
+    info!("start: cleaning up Razer processes and services");
     synapse::kill_razer_apps();
     synapse::services(false);
 
@@ -202,7 +202,7 @@ pub fn run(dir: &Path) {
             Err(e) => {
                 // mouse scollegato, file mancanti...: riprovo finche' non torna, senza riempire il log
                 if e != last_error {
-                    info!("errore: {e}; riprovo ogni 5 secondi");
+                    info!("error: {e}; retrying every 5 seconds");
                     last_error = e;
                 }
                 sleep(Duration::from_secs(5));

@@ -75,7 +75,7 @@ pub fn kill(names: &[&str]) {
         unsafe {
             if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
                 if TerminateProcess(h, 1).is_ok() {
-                    info!("ucciso {name} (pid {pid})");
+                    info!("killed {name} (pid {pid})");
                 }
                 let _ = CloseHandle(h);
             }
@@ -92,7 +92,7 @@ pub fn kill_razer_apps() {
 pub fn services(start: bool) {
     let action = if start { "start" } else { "stop" };
     if !is_admin() {
-        info!("non sono amministratore: servizi Razer lasciati come sono ({action})");
+        info!("not administrator: Razer services left as they are ({action})");
         return;
     }
     unsafe {
@@ -104,7 +104,7 @@ pub fn services(start: bool) {
         }
         let _ = CloseServiceHandle(scm);
     }
-    info!("servizi Razer: {action}");
+    info!("Razer services: {action}");
 }
 
 /// Stato di ogni servizio Razer (`None` = non installato), per il comando di verifica.
