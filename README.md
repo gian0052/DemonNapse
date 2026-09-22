@@ -167,6 +167,7 @@ talk to the mouse, `probe`):
 
 | command | what it does |
 |---|---|
+| `check [PID]` | tries a Razer mouse step by step (see [Supported devices](#supported-devices)) and prints a report |
 | `extract [--out FOLDER]` | effects and profiles from Synapse's logs, written next to `config.json` or in `FOLDER` |
 | `profiles` | profile → matched effect, as JSON |
 | `probe` | firmware, active slot and device mode of the mouse |
@@ -204,9 +205,19 @@ folder. The extracted files and the log are written in the same folder.
 
 Verified on the **Razer Basilisk V3 35K (wired, PID `0x00CB`)** only: control interface,
 per-LED protocol, LED map and profile registers were all reverse-engineered and tested on that
-mouse. Other Razer mice speaking the same protocol (most of them, see the OpenRazer wiki) will
-probably work with a different `pid` (the LED count and map come from Synapse's logs); `tools/sniff.py` (Python, `pip install hidapi`) shows what
-your mouse sends when you press the profile button. Reports and pull requests welcome.
+mouse. Other wired Razer mice speaking the same protocol (most of them, see the OpenRazer wiki)
+will probably work with their own `pid` in `config.json`: the LED count and map come from
+Synapse's logs, and the report's transaction id (`0x1F`, `0x3F` or `0xFF`) is detected.
+
+**Own a different Razer mouse?** Close Synapse, stop the daemon if it runs
+(`schtasks /End /TN DemonNapse`) and run `demonnapse.exe check` (or `check 0x00XX` for a given
+PID). In about 30 seconds it lists the Razer devices, opens the mouse, looks for its LED map and
+profiles in Synapse's logs, reads the on-board slots and switches slot and back, waits 15
+seconds for you to press the profile button, then lights the LEDs red, green, blue and one at a
+time in white. Nothing is written to the mouse memory. Paste the output in an issue and say
+whether every LED lit up in turn: that is how a model gets on the list. Wireless mice and
+keyboards are not supported. `tools/sniff.py` (Python, `pip install hidapi`) shows everything
+the mouse sends.
 
 ## Things you should know before installing
 

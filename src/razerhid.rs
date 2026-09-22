@@ -6,15 +6,23 @@
 
 use crate::layers::Rgb;
 use hidapi::{HidApi, HidDevice};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread::sleep;
 use std::time::Duration;
 
 pub const VID: u16 = 0x1532;
-const TRANSACTION_ID: u8 = 0x1F;
+/// Transaction id dei report: 0x1F sui dispositivi recenti (35K compreso), 0x3F o 0xFF su altri
+/// (tabella dei dispositivi di OpenRazer). `open_control` li prova e tiene quello a cui il mouse risponde.
+const TRANSACTION_IDS: [u8; 3] = [0x1F, 0x3F, 0xFF];
+static TRANSACTION_ID: AtomicU8 = AtomicU8::new(0x1F);
+
+pub fn transaction_id() -> u8 {
+    TRANSACTION_ID.load(Ordering::Relaxed)
+}
 
 pub fn build(cmd_class: u8, cmd_id: u8, data_size: u8, args: &[u8]) -> [u8; 90] {
     let mut r = [0u8; 90];
-    r[1] = TRANSACTION_ID;
+    r[1] = transaction_id();
     r[5] = data_size;
     r[6] = cmd_class;
     r[7] = cmd_id;
@@ -39,15 +47,17 @@ pub fn transact(h: &HidDevice, report: &[u8; 90]) -> Result<[u8; 90], String> {
     Ok(resp)
 }
 
-/// Trova la collection che accetta i feature report da 90 byte. Ritorna anche la risposta
-/// alla sonda (versione firmware, sola lettura).
+/// Trova la collection che accetta i feature report da 90 byte e il transaction id del mouse.
+/// Ritorna anche la risposta alla sonda (versione firmware, sola lettura).
 pub fn open_control(api: &mut HidApi, pid: u16, retries: u32) -> Result<(HidDevice, [u8; 90]), String> {
-    let probe = build(0x00, 0x81, 0x02, &[]);
     for attempt in 0..retries {
         let _ = api.refresh_devices();
         for info in api.device_list().filter(|d| d.vendor_id() == VID && d.product_id() == pid) {
-            if let Ok(h) = info.open_device(api) {
-                if let Ok(resp) = transact(&h, &probe) {
+            let Ok(h) = info.open_device(api) else { continue };
+            // sempre nello stesso ordine: un mouse che accetta qualunque id (il 35K) resta su 0x1F
+            for tid in TRANSACTION_IDS {
+                TRANSACTION_ID.store(tid, Ordering::Relaxed);
+                if let Ok(resp) = transact(&h, &build(0x00, 0x81, 0x02, &[])) {
                     if resp[0] == 0x02 && resp[6] == 0x00 && resp[7] == 0x81 {
                         return Ok((h, resp));
                     }

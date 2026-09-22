@@ -1,6 +1,7 @@
 //! DemonNapse - lightweight companion daemon for Razer Synapse.
 //!
 //!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
+//!   demonnapse check [PID]  prova un mouse Razer passo passo e stampa un rapporto da incollare in una issue
 //!
 //! Strumenti per verificare il port da Python pezzo per pezzo:
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S] [--live]   frame in esadecimale
@@ -16,6 +17,7 @@
 mod log;
 mod ambient;
 mod audio;
+mod check;
 mod config;
 mod daemon;
 mod effect;
@@ -197,7 +199,8 @@ fn main() {
         Some("profiles") => profiles(),
         Some("audio") => audio(&args[1..]),
         Some("synapse") => synapse(&args[1..]),
-        _ => Err("commands: (none = daemon), render, probe, extract, profiles, audio, synapse".into()),
+        Some("check") => check::run(&home(), &args[1..]),
+        _ => Err("commands: (none = daemon), check, render, probe, extract, profiles, audio, synapse".into()),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
