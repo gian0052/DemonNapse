@@ -1,4 +1,6 @@
-//! config.json: mouse da usare, griglia di Chroma Studio e guadagno dell'Audio Meter.
+//! config.json: mouse da usare, griglia di Chroma Studio, abbinamenti forzati profilo -> effetto
+//! (`effect_overrides`), slot da saltare (`skip_slots`), frame al secondo (`fps`) e guadagno
+//! dell'Audio Meter.
 
 use serde::Deserialize;
 use std::collections::HashMap;

@@ -3,7 +3,7 @@
 //!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
 //!
 //! Strumenti per verificare il port da Python pezzo per pezzo:
-//!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S]   frame in esadecimale
+//!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S] [--live]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
 //!   demonnapse audio [secondi]                                               picco dell'uscita audio, 10 letture al secondo

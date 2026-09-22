@@ -53,7 +53,9 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 
 The daemon was first written in Python (kept in `python/` as the reference implementation:
 15 MB of private memory, ~0.7 % of one core) and then ported to Rust. `tools/parity.py`
-checks that both render the same frames, `tools/bench.py` measures a running daemon.
+checks that both render the same frames, except layers with random colours and the layers
+redone in Rust on Razer's measurements (Wave, Wheel, Tidal, Ripple, Fire, Starlight, Ambient),
+which `cargo test` covers instead; `tools/bench.py` measures a running daemon.
 
 ## How it compares
 
@@ -125,14 +127,19 @@ Meter were measured on the Chroma Studio preview, which shows the frames of Raze
   MSVC target, no C compiler needed), or put a prebuilt one next to `install.cmd`
 - A supported mouse (see below)
 
-Python is only needed for the scripts in `tools/` and for the reference daemon in `python/`.
+Python is only needed for the scripts in `tools/` and for the reference daemon in `python/`
+(`pip install -r python/requirements.txt`). Besides `parity.py`, `bench.py` and `sniff.py`:
+`tools/preview.py` shows a Chroma Studio effect on the mouse without assigning it to a profile,
+and `tools/synapse-inspect.mjs` (Node) reads Chroma Studio's options from a running Synapse
+started with `--inspect`, the way the layers were measured.
 
 ## Install
 
 1. In Synapse: put your profiles in on-board memory slots, name a Chroma Studio effect with a
    word in common with each profile, **modify a layer after renaming** (Synapse only logs the
    new name when something changes), then quit Synapse completely (tray → Exit).
-2. Optional: `target\release\demonnapse.exe extract` lists every effect and profile found in
+2. Optional: `demonnapse.exe extract` (the one next to `install.cmd`, or
+   `target\release\demonnapse.exe` if you built it) lists every effect and profile found in
    Synapse's logs. The daemon reads them by itself on its first start and again every time
    you close Synapse.
 3. Right-click `install.cmd` → **Run as administrator**. It looks for `demonnapse.exe` next to
@@ -146,9 +153,22 @@ Debug run with every HID event logged: stop the task (`schtasks /End /TN DemonNa
 `demonnapse.exe -v` from a terminal **opened as administrator** (otherwise it cannot stop the
 Razer services); from a terminal the log goes to the screen instead of the file.
 
-Other commands, used to check the daemon piece by piece: `probe` (firmware, active slot, device
-mode), `profiles` (profile → effect), `audio` (output peak), `synapse` (is Synapse open, state
-of the Razer services), `render` (frames of an effect as hex; `--live` renders in real time, for Ambient).
+Other commands, used to check the daemon piece by piece (stop the task first for the ones that
+talk to the mouse, `probe`):
+
+| command | what it does |
+|---|---|
+| `extract [--out FOLDER]` | effects and profiles from Synapse's logs, written next to `config.json` or in `FOLDER` |
+| `profiles` | profile → matched effect, as JSON |
+| `probe` | firmware, active slot and device mode of the mouse |
+| `audio [seconds]` | output peak, 10 readings a second (default 3 s) |
+| `synapse [--kill NAME.exe]` | is Synapse open, are we admin, state of the Razer services; `--kill` closes one process the way the daemon closes Synapse |
+| `render "<effect>" <t0> <frames> <fps>` | frames of an effect from time `t0` (seconds), one line of hex colours per frame |
+
+`render` options: `--layer NAME` only that layer (first region), `--all` the effect spread over
+every LED, `--clicks S,S,...` mouse clicks at those seconds (Reactive and playback on click),
+`--live` renders in real time, for Ambient. `demonnapse.exe` has no window of its own, so in a
+terminal the prompt may come back before the output: press Enter once it has printed.
 
 To go back exactly to how things were: `uninstall.cmd` as administrator. On the first install
 `install.cmd` saves to `razer_backup.txt` the start type of the Razer services, Synapse's autostart
@@ -168,6 +188,7 @@ folder. The extracted files and the log are written in the same folder.
 | `device.chroma_grid` | Chroma Studio grid position `"row,col"` → physical LED index |
 | `effect_overrides` | `{"Profile name": "Chroma Effect X"}` when names have nothing in common |
 | `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
+| `fps` | frames per second sent to the mouse (default 60) |
 | `audio_gain` | multiplies the output peak before the Audio Meter (default 1, same as Razer) |
 
 ## Supported devices
@@ -193,6 +214,8 @@ your mouse sends when you press the profile button. Reports and pull requests we
   listens there unless you run it, and `tools/bench.py` uses it to count frames.
 - Every Chroma Studio layer is imported; all of them are rendered except Chroma Generate,
   which is ignored with a warning.
+- A "click" means a **mouse button** (left, right, middle, side buttons), never the keyboard,
+  even where Chroma Studio says "on any key pressed".
 - **Tidal started by a click** (playback start "on any key pressed") does not match Razer's
   engine yet: it starts and stops, but the timing of each run differs. A Tidal that always runs
   is rendered like Razer's.

@@ -1,5 +1,5 @@
 """Sniffer HID Razer: mostra cosa manda il mouse al PC (es. pulsante profilo).
-Uso: CHIUDI Synapse del tutto (anche dal tray), poi:  python sniff.py
+Uso: CHIUDI Synapse del tutto (anche dal tray), poi:  python tools/sniff.py
 Premi il pulsante profilo sotto il mouse e guarda cosa compare. Ctrl+C per uscire."""
 import time
 import hid

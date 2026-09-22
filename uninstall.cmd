@@ -10,12 +10,9 @@ if errorlevel 1 (
 )
 
 echo [1/2] Stopping the daemon and removing the scheduled task...
-for %%T in ("DemonNapse" "RazerLite" "RazerLiteWallpaper") do (
-    schtasks /End /TN %%T >nul 2>&1
-    schtasks /Delete /F /TN %%T >nul 2>&1
-)
+schtasks /End /TN "DemonNapse" >nul 2>&1
+schtasks /Delete /F /TN "DemonNapse" >nul 2>&1
 taskkill /F /IM demonnapse.exe >nul 2>&1
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'demonnapse.py|razerlite.py|wallpaper.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 
 echo [2/2] Razer services and Synapse's autostart as they were before the install...
 :: razer_backup.txt is written by install.cmd; without it (installed with an older version) services go automatic and Synapse gets its standard autostart
