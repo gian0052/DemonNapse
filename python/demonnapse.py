@@ -109,10 +109,10 @@ class Effect:
 
     def idle(self, now):
         """True se l'audio tace da abbastanza: tocca a statico e reactive."""
-        return not self.audio or now - self.last_audio > self.cfg["audio_idle_delay"]
+        return not self.audio or now - self.last_audio > self.cfg.get("audio_idle_delay", 3.0)
 
     def render(self, now, dt, meter):
-        floor = self.cfg["audio_silence_floor"]
+        floor = self.cfg.get("audio_silence_floor", 0.02)
         for leds, stops, boost, decay in self.audio:
             peak = min(1.0, meter.peak() * boost * self.cfg["audio_gain"])
             self.level = max(peak, self.level - dt / max(decay, 0.05))

@@ -24,7 +24,5 @@
     1
   ],
   "fps": 60,
-  "audio_silence_floor": 0.02,
-  "audio_gain": 1.0,
-  "audio_idle_delay": 3.0
+  "audio_gain": 1.0
 }

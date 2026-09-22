@@ -58,6 +58,13 @@ impl ProfileTracker {
     }
 }
 
+/// Effetti e profili dai log di Synapse, scritti in `dir`.
+fn extract_all(dir: &Path) -> Result<(), String> {
+    let cfg = Config::load(dir)?;
+    extract::effects(dir)?;
+    extract::profiles(dir, cfg.pid()).map(drop)
+}
+
 /// Synapse e' aperto: gli lascio il mouse e i servizi, e aspetto.
 fn wait_for_synapse_to_close(dir: &Path) {
     info!("Synapse aperto: mi metto in pausa");
@@ -66,11 +73,7 @@ fn wait_for_synapse_to_close(dir: &Path) {
         sleep(Duration::from_secs(1));
     }
     info!("Synapse chiuso: rileggo gli effetti e riprendo");
-    let extracted = Config::load(dir).and_then(|cfg| {
-        extract::effects(dir)?;
-        extract::profiles(dir, cfg.pid()).map(drop)
-    });
-    if let Err(e) = extracted {
+    if let Err(e) = extract_all(dir) {
         info!("estrazione effetti fallita, tengo i vecchi: {e}");
     }
     sleep(Duration::from_secs(2)); // lascio finire i processi figli di Synapse
@@ -80,6 +83,11 @@ fn wait_for_synapse_to_close(dir: &Path) {
 
 /// Una "sessione" tra un'apertura di Synapse e l'altra. Ritorna Ok quando Synapse compare.
 fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpSocket>, last_error: &mut String) -> Result<(), String> {
+    // prima installazione: i file estratti non ci sono ancora, li leggo subito dai log di Synapse
+    if !dir.join("chroma_effects_dump.json").exists() || !dir.join("synapse_profiles.json").exists() {
+        extract_all(dir)?;
+        info!("effetti e profili letti dai log di Synapse");
+    }
     let cfg = Config::load(dir)?;
     let grid = cfg.grid();
     let canvas = Canvas::new(&grid, cfg.device.leds);

@@ -80,8 +80,11 @@ like Chroma Studio and only want it to stop running all day.
 2. **The daemon reads those logs** (`src/extract.rs`): the layers of every Chroma Studio
    effect, whatever its type, and the on-board slot of every profile.
 3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
-   `DOTA 2` → `Chroma Effect DOTA`. Words in common win; `effect_overrides` in `config.json`
-   forces a match when the names differ. Effects can have any name: `Chroma Effect …` is only
+   `DOTA 2` → `Chroma Effect DOTA`. Names are compared word by word (letters and digits only,
+   case ignored, a leading `Chroma Effect` does not count); the effect with the most words in
+   common wins, and on a tie the first one in Synapse's logs. `effect_overrides` in
+   `config.json` forces a match when the names differ. A profile with no matching effect keeps
+   its RGB **off** (the log says so). Effects can have any name: `Chroma Effect …` is only
    Synapse's default, a renamed effect is read the same way.
 4. **The mouse tells the daemon which profile is active** (vendor HID register `0x05/0x84`,
    plus the DPI/scroll events the firmware sends on every switch). The daemon renders the
@@ -129,14 +132,19 @@ Python is only needed for the scripts in `tools/` and for the reference daemon i
 1. In Synapse: put your profiles in on-board memory slots, name a Chroma Studio effect with a
    word in common with each profile, **modify a layer after renaming** (Synapse only logs the
    new name when something changes), then quit Synapse completely (tray → Exit).
-2. `target\release\demonnapse.exe extract` — check that every effect and profile is listed.
+2. Optional: `target\release\demonnapse.exe extract` lists every effect and profile found in
+   Synapse's logs. The daemon reads them by itself on its first start and again every time
+   you close Synapse.
 3. Right-click `install.cmd` → **Run as administrator**. It looks for `demonnapse.exe` next to
    itself, then in `target\release`. It creates a scheduled task at logon with elevated rights
    (needed to stop/start Razer services), removes Synapse from Windows autostart, sets the Razer services to manual start and launches the daemon.
 
-Log: `demonnapse.log` next to `config.json`. If the mouse is unplugged or a file is missing the
-daemon logs the error once and retries every 5 seconds. Debug run, from a terminal, with every
-HID event logged: stop the task (`schtasks /End /TN DemonNapse`), then `demonnapse.exe -v`.
+Log: `demonnapse.log` next to `config.json`, one line per event as `YYYY-MM-DD HH:MM:SS message`.
+It is never rotated; it grows by a few lines a day, delete it whenever you like. If the mouse is
+unplugged or a file is missing the daemon logs the error once and retries every 5 seconds.
+Debug run with every HID event logged: stop the task (`schtasks /End /TN DemonNapse`), then run
+`demonnapse.exe -v` from a terminal **opened as administrator** (otherwise it cannot stop the
+Razer services); from a terminal the log goes to the screen instead of the file.
 
 Other commands, used to check the daemon piece by piece: `probe` (firmware, active slot, device
 mode), `profiles` (profile → effect), `audio` (output peak), `synapse` (is Synapse open, state
@@ -149,6 +157,10 @@ Without that file (installed with an older version) the services are set to auto
 gets its standard, enabled autostart entry.
 
 ## Configuration (`config.json`)
+
+The daemon looks for `config.json` next to `demonnapse.exe` or up to two folders above it (so
+`target\release\demonnapse.exe` finds the one in the repository root), otherwise in the current
+folder. The extracted files and the log are written in the same folder.
 
 | key | meaning |
 |---|---|
@@ -176,6 +188,9 @@ your mouse sends when you press the profile button. Reports and pull requests we
 - It uses only user-mode APIs (`hidapi` feature reports, `GetAsyncKeyState`, WASAPI meter,
   DXGI Desktop Duplication for Ambient),
   the same approach as OpenRGB/OpenRazer. Not tested against anti-cheat systems.
+- Every frame is also sent as a small UDP packet to `127.0.0.1:47311` (local only, it never
+  leaves the PC), for an experimental desktop wallpaper that takes the mouse colours; nothing
+  listens there unless you run it, and `tools/bench.py` uses it to count frames.
 - Every Chroma Studio layer is imported; all of them are rendered except Chroma Generate,
   which is ignored with a warning.
 - **Tidal started by a click** (playback start "on any key pressed") does not match Razer's
