@@ -15,3 +15,5 @@ __pycache__/
 *.pyc
 # rust
 target/
+# copia dello stato dei servizi Razer, scritta da install.cmd e letta da uninstall.cmd
+razer_backup.txt

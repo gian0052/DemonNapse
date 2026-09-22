@@ -15,7 +15,7 @@ def extract(verbose=True):
 
     dec = json.JSONDecoder()
     effects = {}
-    for m in re.finditer(r'"title":"(Chroma Effect[^"]*)"', txt):
+    for m in re.finditer(r'"title":"([^"]+)"', txt):
         start = m.start()
         for _ in range(6):  # risale all'oggetto JSON che contiene il titolo
             start = txt.rfind("{", 0, start)
@@ -25,7 +25,8 @@ def extract(verbose=True):
                 obj, _ = dec.raw_decode(txt[start:])
             except ValueError:
                 continue
-            if isinstance(obj, dict) and "layers" in obj:
+            # l'effetto e' l'oggetto con i layer e con proprio quel titolo (non i titoli dei layer)
+            if isinstance(obj, dict) and "layers" in obj and obj.get("title") == m.group(1):
                 effects[m.group(1)] = obj
                 break
 

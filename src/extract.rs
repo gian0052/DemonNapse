@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const TITLE_KEY: &str = "\"title\":\"";
-const TITLE_PREFIX: &str = "Chroma Effect";
 const PROFILE_KEY: &str = "{\"activeProfile\":";
 
 fn logs_dir() -> PathBuf {
@@ -51,7 +50,7 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
     while let Some(i) = txt[from..].find(TITLE_KEY) {
         let at = from + i;
         from = at + TITLE_KEY.len();
-        let Some(title) = txt[from..].find('"').map(|n| &txt[from..from + n]).filter(|t| t.starts_with(TITLE_PREFIX)) else {
+        let Some(title) = txt[from..].find('"').map(|n| &txt[from..from + n]).filter(|t| !t.is_empty()) else {
             continue;
         };
         let mut start = at;
@@ -59,7 +58,9 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
             // risale all'oggetto JSON che contiene il titolo
             let Some(s) = txt[..start].rfind('{') else { break };
             start = s;
-            if let Some(obj) = decode_prefix(&txt[start..]).filter(|o| o.get("layers").is_some()) {
+            // un effetto e' l'oggetto con i layer e con proprio quel titolo: cosi' i titoli dei layer
+            // (STATIC, WAVE...) non diventano effetti e un effetto rinominato viene letto lo stesso
+            if let Some(obj) = decode_prefix(&txt[start..]).filter(|o| o.get("layers").is_some() && o["title"] == title) {
                 effects.insert(title.to_string(), obj);
                 break;
             }

@@ -14,6 +14,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [0/4] Salvo com'erano i servizi Razer e l'avvio di Synapse (per uninstall.cmd)...
+:: solo alla prima installazione: a una reinstallazione i servizi sono gia' manuali e il salvataggio sarebbe sbagliato
+powershell -NoProfile -Command "$f='%DIR%razer_backup.txt'; if ((Test-Path $f) -or (Get-ScheduledTask -TaskName 'DemonNapse','RazerLite' -EA 0)) { exit }; $o=@(); foreach ($s in 'RzActionSvc','RazerExperienceService','Razer Game Manager Service 3','RGS','Razer Chroma SDK Server','Razer Chroma SDK Service','Razer Chroma SDK Diagnostic Service','Razer Chroma Stream Server','Razer Elevation Service') { $k=Get-ItemProperty ('HKLM:\SYSTEM\CurrentControlSet\Services\'+$s) -EA 0; if (-not $k) { continue }; $t=@{2='auto';3='demand';4='disabled'}[[int]$k.Start]; if ($t -eq 'auto' -and $k.DelayedAutostart -eq 1) { $t='delayed-auto' }; if ($t) { $o+=('service|'+$s+'|'+$t) } }; $o+=('run|'+(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -EA 0).RazerAppEngine); $a=(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -EA 0).RazerAppEngine; $o+=('approved|'+$(if ($a) { [BitConverter]::ToString($a) })); Set-Content -Encoding utf8 $f $o"
+
 echo [1/4] Attivita' pianificata "DemonNapse" all'accesso, con privilegi elevati...
 schtasks /End /TN "DemonNapse" >nul 2>&1
 schtasks /End /TN "RazerLite" >nul 2>&1

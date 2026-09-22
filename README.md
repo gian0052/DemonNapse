@@ -81,7 +81,8 @@ like Chroma Studio and only want it to stop running all day.
    effect, whatever its type, and the on-board slot of every profile.
 3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
    `DOTA 2` → `Chroma Effect DOTA`. Words in common win; `effect_overrides` in `config.json`
-   forces a match when the names differ.
+   forces a match when the names differ. Effects can have any name: `Chroma Effect …` is only
+   Synapse's default, a renamed effect is read the same way.
 4. **The mouse tells the daemon which profile is active** (vendor HID register `0x05/0x84`,
    plus the DPI/scroll events the firmware sends on every switch). The daemon renders the
    matching effect frame by frame over HID (`0x0F/0x03`, per-LED) — no Razer software needed.
@@ -141,7 +142,11 @@ Other commands, used to check the daemon piece by piece: `probe` (firmware, acti
 mode), `profiles` (profile → effect), `audio` (output peak), `synapse` (is Synapse open, state
 of the Razer services), `render` (frames of an effect as hex; `--live` renders in real time, for Ambient).
 
-To go back exactly to how things were: `uninstall.cmd` as administrator.
+To go back exactly to how things were: `uninstall.cmd` as administrator. On the first install
+`install.cmd` saves to `razer_backup.txt` the start type of the Razer services, Synapse's autostart
+entry and whether that entry is disabled in Task Manager; `uninstall.cmd` puts back exactly those.
+Without that file (installed with an older version) the services are set to automatic and Synapse
+gets its standard, enabled autostart entry.
 
 ## Configuration (`config.json`)
 
