@@ -1,12 +1,12 @@
 # DemonNapse
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/rust-single%20490%20KB%20exe-orange)
+![Rust](https://img.shields.io/badge/rust-single%20520%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
 Lightweight replacement for Razer Synapse's RGB engine on Windows. Keep designing your
-profiles and Chroma Studio effects in Synapse, close it, and a 490 KB Rust daemon using
+profiles and Chroma Studio effects in Synapse, close it, and a 520 KB Rust daemon using
 under 2 MB of private memory takes over: one RGB effect per on-board profile, switched with the profile button under the mouse,
 with Synapse and all Razer services shut down.
 
@@ -32,7 +32,7 @@ find (September 2026), no other project does these four things:
 3. **Automatic hand-over.** Open Synapse and the daemon starts the Razer services, releases
    the mouse and waits. Close Synapse and it re-imports your changes, stops the services and
    takes the mouse back. You never touch a terminal or a config file.
-4. **About 2 MB of memory.** A single 490 KB executable using 1.5–2 MB of private memory and
+4. **About 2 MB of memory.** A single 520 KB executable using 1.5–2 MB of private memory and
    ~0.1 % of one core. Synapse and its services sit at 600–800 MB; the lightest alternatives
    declare 14–40 MB.
 
