@@ -1,4 +1,4 @@
-//! Picco dell'uscita audio di sistema (IAudioMeterInformation): niente cattura, costo ~zero.
+//! Peak of the system audio output (IAudioMeterInformation): no capture, ~zero cost.
 
 use std::time::{Duration, Instant};
 use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
@@ -12,7 +12,7 @@ pub struct PeakMeter {
 }
 
 impl PeakMeter {
-    /// Va usato sempre dallo stesso thread che lo crea (COM viene inizializzato qui).
+    /// Must always be used from the same thread that creates it (COM is initialised here).
     pub fn new() -> PeakMeter {
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         PeakMeter { meter: None }
@@ -26,7 +26,7 @@ impl PeakMeter {
     }
 
     pub fn peak(&mut self) -> f64 {
-        // riaggancia ogni 10s: segue il cambio di dispositivo predefinito
+        // re-acquires every 10s: follows a change of the default device
         if !self.meter.as_ref().is_some_and(|(_, t)| t.elapsed() < REACQUIRE) {
             self.meter = None;
             match Self::acquire() {
@@ -38,7 +38,7 @@ impl PeakMeter {
         match unsafe { meter.GetPeakValue() } {
             Ok(v) => v as f64,
             Err(e) => {
-                // dispositivo sparito, COM, ecc.
+                // device gone, COM, etc.
                 debug!("audio: {e}");
                 self.meter = None;
                 0.0

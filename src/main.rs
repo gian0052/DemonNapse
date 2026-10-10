@@ -1,15 +1,15 @@
 //! DemonNapse - lightweight companion daemon for Razer Synapse.
 //!
-//!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
-//!   demonnapse check [PID]  prova un mouse Razer passo passo e stampa un rapporto da incollare in una issue
+//!   demonnapse [-v]        the daemon (no window; log to demonnapse.log if there is no terminal)
+//!   demonnapse check [PID]  tests a Razer mouse step by step and prints a report to paste into an issue
 //!
-//! Strumenti per verificare il demone pezzo per pezzo:
-//!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S] [--live]   frame in esadecimale
-//!   demonnapse probe                                                          firmware e slot attivo
-//!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)
-//!   demonnapse audio [secondi]                                               picco dell'uscita audio, 10 letture al secondo
-//!   demonnapse synapse [--kill NOME.exe]                                      Synapse aperto? admin? stato dei servizi Razer
-//!   demonnapse extract [--out CARTELLA]                                       effetti e profili dai log di Synapse
+//! Tools to verify the daemon piece by piece:
+//!   demonnapse render "<effect>" <t0> <frames> <fps> [--layer NAME] [--all] [--clicks S,S] [--live]   frames in hexadecimal
+//!   demonnapse probe                                                          firmware and active slot
+//!   demonnapse profiles                                                       profile -> matched effect (JSON)
+//!   demonnapse audio [seconds]                                               peak of the audio output, 10 readings per second
+//!   demonnapse synapse [--kill NAME.exe]                                      Synapse open? admin? state of the Razer services
+//!   demonnapse extract [--out FOLDER]                                         effects and profiles from Synapse's logs
 
 #![windows_subsystem = "windows"]
 
@@ -35,8 +35,8 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
-/// Cartella con config.json e i file estratti: accanto all'eseguibile o poco sopra (l'exe compilato
-/// sta in target/release), altrimenti quella corrente.
+/// Folder with config.json and the extracted files: next to the executable or a little above it (the compiled
+/// exe is in target/release), otherwise the current one.
 fn home() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let found = exe.ancestors().skip(1).take(3).find(|d| d.join("config.json").exists());
@@ -52,7 +52,7 @@ fn render(args: &[String]) -> Result<(), String> {
     let pos: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let only = opt("--layer");
-    // --clicks: istanti dei click in secondi, separati da virgole (per reactive e playback al click)
+    // --clicks: times of the clicks in seconds, comma-separated (for reactive and on-click playback)
     let clicks_arg = opt("--clicks");
     let pos: Vec<&String> = pos.into_iter().filter(|a| Some(*a) != only.as_ref() && Some(*a) != clicks_arg.as_ref()).collect();
     let [title, t0, frames, fps] = pos[..] else {
@@ -92,7 +92,7 @@ fn render(args: &[String]) -> Result<(), String> {
     for name in unsupported {
         eprintln!("layer '{name}' not supported, ignored");
     }
-    // --live: in tempo reale, un frame ogni 1/fps s (per l'Ambient, che legge lo schermo)
+    // --live: in real time, one frame every 1/fps s (for the Ambient, which reads the screen)
     let live = args.iter().any(|a| a == "--live");
     let start = std::time::Instant::now();
     for n in 0..frames {
@@ -164,7 +164,7 @@ fn audio(args: &[String]) -> Result<(), String> {
 
 fn synapse(args: &[String]) -> Result<(), String> {
     if let Some(name) = args.iter().position(|a| a == "--kill").and_then(|i| args.get(i + 1)) {
-        synapse::kill(&[name.to_lowercase().as_str()]); // per provare la chiusura su un processo innocuo
+        synapse::kill(&[name.to_lowercase().as_str()]); // to try the kill on a harmless process
         return Ok(());
     }
     let t = std::time::Instant::now();
@@ -184,13 +184,13 @@ fn synapse(args: &[String]) -> Result<(), String> {
 }
 
 fn main() {
-    // senza finestra propria: se mi lancia un terminale scrivo nel suo
+    // no window of its own: if a terminal launches me I write to it
     let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         None | Some("-v") => {
             log::init(&home().join("demonnapse.log"), !args.is_empty());
-            // con panic=abort non resta traccia: il motivo va nel log
+            // with panic=abort no trace is left: the reason goes in the log
             std::panic::set_hook(Box::new(|p| info!("fatal error: {p}")));
             daemon::run(&home());
             Ok(())

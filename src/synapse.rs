@@ -1,5 +1,5 @@
-//! Convivenza con Synapse: capire se e' aperto, chiudere i processi Razer rimasti appesi,
-//! fermare e riavviare i servizi Razer (solo da amministratore).
+//! Living alongside Synapse: telling whether it is open, closing the Razer processes left hanging,
+//! stopping and restarting the Razer services (as administrator only).
 
 use std::sync::Mutex;
 use windows::core::{HSTRING, PCWSTR};
@@ -13,8 +13,8 @@ use windows::Win32::System::Services::{
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 use windows::Win32::UI::Shell::IsUserAnAdmin;
 
-const SYNAPSE_EXES: &[&str] = &["razerappengine.exe"]; // Synapse 4 e Chroma App
-const RAZER_EXES: &[&str] = &["razerappengine.exe", "razeraxon.exe"]; // da uccidere se restano appesi
+const SYNAPSE_EXES: &[&str] = &["razerappengine.exe"]; // Synapse 4 and Chroma App
+const RAZER_EXES: &[&str] = &["razerappengine.exe", "razeraxon.exe"]; // to be killed if they are left hanging
 pub const RAZER_SERVICES: &[&str] = &[
     "RzActionSvc",
     "RazerExperienceService",
@@ -27,7 +27,7 @@ pub const RAZER_SERVICES: &[&str] = &[
     "Razer Elevation Service",
 ];
 
-/// (pid, nome) dei processi il cui eseguibile e' in `names` (minuscolo).
+/// (pid, name) of the processes whose executable is in `names` (lowercase).
 fn processes(names: &[&str]) -> Vec<(u32, String)> {
     let mut found = Vec::new();
     unsafe {
@@ -51,10 +51,10 @@ pub fn is_admin() -> bool {
     unsafe { IsUserAnAdmin() }.as_bool()
 }
 
-/// Synapse e' aperto? Chiamata spesso: l'elenco completo dei processi (qualche ms) viene riletto
-/// solo quando compare un pid nuovo, altrimenti basta l'elenco dei pid.
+/// Is Synapse open? Called often: the full process list (a few ms) is re-read
+/// only when a new pid appears, otherwise the list of pids is enough.
 pub fn running() -> bool {
-    static SEEN: Mutex<(Vec<u32>, Vec<u32>)> = Mutex::new((Vec::new(), Vec::new())); // pid gia' visti, pid di Synapse
+    static SEEN: Mutex<(Vec<u32>, Vec<u32>)> = Mutex::new((Vec::new(), Vec::new())); // pids already seen, Synapse's pids
     let mut pids = vec![0u32; 4096];
     let mut bytes = 0;
     if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut bytes) }.is_err() {
@@ -87,8 +87,8 @@ pub fn kill_razer_apps() {
     kill(RAZER_EXES);
 }
 
-/// Avvia o ferma i servizi Razer, senza aspettare che finiscano (come `sc start` / `sc stop`).
-/// Richiede privilegi di amministratore.
+/// Starts or stops the Razer services, without waiting for them to finish (like `sc start` / `sc stop`).
+/// Requires administrator privileges.
 pub fn services(start: bool) {
     let action = if start { "start" } else { "stop" };
     if !is_admin() {
@@ -107,7 +107,7 @@ pub fn services(start: bool) {
     info!("Razer services: {action}");
 }
 
-/// Stato di ogni servizio Razer (`None` = non installato), per il comando di verifica.
+/// State of every Razer service (`None` = not installed), for the verification command.
 pub fn service_states() -> Vec<(&'static str, Option<u32>)> {
     let mut out = Vec::new();
     unsafe {

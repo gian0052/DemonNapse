@@ -1,6 +1,6 @@
-//! config.json: mouse da usare, griglia di Chroma Studio, abbinamenti forzati profilo -> effetto
-//! (`effect_overrides`), slot da saltare (`skip_slots`), frame al secondo (`fps`), guadagno
-//! dell'Audio Meter e gesto per spegnere le luci (`lights_toggle_clicks`, `lights_toggle_seconds`).
+//! config.json: which mouse to use, Chroma Studio grid, forced profile -> effect matches
+//! (`effect_overrides`), slots to skip (`skip_slots`), frames per second (`fps`), Audio Meter
+//! gain and the gesture that turns the lights off (`lights_toggle_clicks`, `lights_toggle_seconds`).
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -8,14 +8,14 @@ use std::path::Path;
 
 #[derive(Deserialize)]
 pub struct Device {
-    // PID USB in esadecimale, es. "0x00CB"; se manca il mouse viene cercato tra i dispositivi collegati
+    // USB PID in hexadecimal, e.g. "0x00CB"; if missing, the mouse is looked for among the connected devices
     #[serde(default)]
     pub pid: String,
-    // se mancano si usano quelli letti dai log di Synapse (synapse_device.json)
+    // if missing, the ones read from Synapse's logs are used (synapse_device.json)
     #[serde(default)]
     pub leds: usize,
     #[serde(default)]
-    pub chroma_grid: HashMap<String, usize>, // "riga,colonna" di Chroma Studio -> indice LED fisico
+    pub chroma_grid: HashMap<String, usize>, // Chroma Studio "row,column" -> physical LED index
 }
 
 #[derive(Deserialize)]
@@ -29,18 +29,18 @@ pub struct Config {
     pub fps: f64,
     #[serde(default = "default_gain")]
     pub audio_gain: f64,
-    /// Tanti clic sul pulsante dei profili entro `lights_toggle_seconds` spengono/riaccendono i LED (0 = mai).
+    /// That many clicks on the profile button within `lights_toggle_seconds` turn the LEDs off/back on (0 = never).
     #[serde(default = "default_toggle_clicks")]
     pub lights_toggle_clicks: usize,
     #[serde(default = "default_toggle_seconds")]
     pub lights_toggle_seconds: f64,
-    /// Il mouse trovato da solo quando `device.pid` manca: (PID, come e' stato scelto) o perche' no.
+    /// The mouse found automatically when `device.pid` is missing: (PID, how it was chosen) or why not.
     #[serde(skip)]
     pub detected: Option<Result<(u16, String), String>>,
 }
 
-/// Quale dispositivo Razer collegato e' il mouse: quello che Synapse chiama "mouse" o, se Synapse non
-/// ne conosce il tipo, l'unico collegato. Mai una tastiera o altro, e mai a caso tra piu' candidati.
+/// Which connected Razer device is the mouse: the one Synapse calls "mouse" or, if Synapse does not
+/// know its type, the only connected device of unknown type. Never a keyboard or anything else, and never at random among several candidates.
 pub fn choose_mouse(connected: &[(u16, String)], categories: &HashMap<u16, String>) -> Result<(u16, String), String> {
     let list = |devs: &[&(u16, String)]| devs.iter().map(|(p, n)| format!("0x{p:04X} {n}")).collect::<Vec<_>>().join(", ");
     let mice: Vec<&(u16, String)> = connected.iter().filter(|(p, _)| categories.get(p).is_some_and(|c| c == "mouse")).collect();
@@ -81,7 +81,7 @@ impl Config {
             cfg.detected = Some(choose_mouse(&connected, &crate::extract::categories()));
         }
         if cfg.device.chroma_grid.is_empty() {
-            // mappa dei LED non scritta a mano: quella di Chroma Studio, se e' gia' stata estratta
+            // LED map not written by hand: the one from Chroma Studio, if it has already been extracted
             let read = std::fs::read_to_string(dir.join("synapse_device.json")).ok();
             if let Some(map) = read.and_then(|t| serde_json::from_str::<crate::extract::DeviceMap>(&t).ok()) {
                 cfg.device.leds = map.leds;
@@ -91,7 +91,7 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Errore se non c'e' una mappa dei LED ne' in config.json ne' dai log di Synapse.
+    /// Error if there is no LED map, neither in config.json nor from Synapse's logs.
     pub fn check_device(&self) -> Result<(), String> {
         if self.device.leds == 0 || self.grid().is_empty() {
             return Err("no LED map for the mouse: open Synapse once and close it, or set device.leds and device.chroma_grid in config.json".into());
@@ -103,7 +103,7 @@ impl Config {
         u16::from_str_radix(self.device.pid.trim_start_matches("0x").trim_start_matches("0X"), 16).ok().filter(|&p| p != 0)
     }
 
-    /// Il PID del mouse: quello di config.json o quello trovato da solo, altrimenti l'errore.
+    /// The mouse's PID: the one in config.json or the one found automatically, otherwise the error.
     pub fn mouse(&self) -> Result<u16, String> {
         match (self.configured_pid(), &self.detected) {
             (Some(pid), _) => Ok(pid),
@@ -113,7 +113,7 @@ impl Config {
         }
     }
 
-    /// (riga, colonna) -> indice LED fisico
+    /// (row, column) -> physical LED index
     pub fn grid(&self) -> HashMap<(i64, i64), usize> {
         self.device
             .chroma_grid
@@ -139,13 +139,13 @@ mod tests {
         let mouse = (0x00CB, "Razer Basilisk V3 35K".to_string());
         let keyboard = (0x028F, "Razer BlackWidow".to_string());
         let (both, known) = (vec![mouse.clone(), keyboard.clone()], cats(&[(0x00CB, "mouse"), (0x028F, "keyboard")]));
-        assert_eq!(choose_mouse(&both, &known).unwrap().0, 0x00CB, "mouse e tastiera: il mouse");
-        assert_eq!(choose_mouse(&[mouse.clone()], &HashMap::new()).unwrap().0, 0x00CB, "unico collegato, tipo sconosciuto");
-        assert!(choose_mouse(&[keyboard.clone()], &known).is_err(), "solo una tastiera: nessun mouse");
-        assert_eq!(choose_mouse(&both, &cats(&[(0x028F, "keyboard")])).unwrap().0, 0x00CB, "la tastiera nota esclusa, resta il mouse sconosciuto");
-        assert!(choose_mouse(&both, &HashMap::new()).is_err(), "due sconosciuti: non tiro a indovinare");
+        assert_eq!(choose_mouse(&both, &known).unwrap().0, 0x00CB, "mouse and keyboard: the mouse");
+        assert_eq!(choose_mouse(&[mouse.clone()], &HashMap::new()).unwrap().0, 0x00CB, "the only one connected, type unknown");
+        assert!(choose_mouse(&[keyboard.clone()], &known).is_err(), "only a keyboard: no mouse");
+        assert_eq!(choose_mouse(&both, &cats(&[(0x028F, "keyboard")])).unwrap().0, 0x00CB, "the known keyboard is excluded, the unknown mouse remains");
+        assert!(choose_mouse(&both, &HashMap::new()).is_err(), "two unknown devices: I do not guess");
         let second = (0x0099, "Razer Basilisk V3".to_string());
-        assert!(choose_mouse(&[mouse, second], &cats(&[(0x00CB, "mouse"), (0x0099, "mouse")])).is_err(), "due mouse: si sceglie in config.json");
+        assert!(choose_mouse(&[mouse, second], &cats(&[(0x00CB, "mouse"), (0x0099, "mouse")])).is_err(), "two mice: the choice is made in config.json");
         assert!(choose_mouse(&[], &known).is_err());
     }
 }

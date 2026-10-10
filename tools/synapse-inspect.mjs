@@ -1,12 +1,12 @@
-// Valuta un'espressione JavaScript nel processo principale di Synapse, per studiare Chroma Studio
-// (opzioni dei layer, anteprima animata) senza usare il mouse.
+// Evaluates a JavaScript expression in Synapse's main process, to study Chroma Studio
+// (layer options, animated preview) without using the mouse.
 //
-// Synapse va avviato a mano con l'inspector di Node, che ascolta solo su 127.0.0.1:
-//   "C:\Program Files\Razer\RazerAppEngine\app-<versione>\RazerAppEngine.exe" --url-params=apps=synapse,chroma-app --inspect=127.0.0.1:9230
-// Finche' la porta e' aperta qualunque programma locale puo' comandare Synapse: chiuderlo a fine lavoro.
+// Synapse must be started by hand with Node's inspector, which listens on 127.0.0.1 only:
+//   "C:\Program Files\Razer\RazerAppEngine\app-<version>\RazerAppEngine.exe" --url-params=apps=synapse,chroma-app --inspect=127.0.0.1:9230
+// As long as the port is open any local program can control Synapse: close Synapse when the work is done.
 //
-// Uso:  node tools/synapse-inspect.mjs "<corpo di una funzione async; return il risultato>"
-//       es. node tools/synapse-inspect.mjs "return require('electron').BrowserWindow.getAllWindows().map(w => w.getTitle())"
+// Usage:  node tools/synapse-inspect.mjs "<body of an async function; return the result>"
+//       e.g. node tools/synapse-inspect.mjs "return require('electron').BrowserWindow.getAllWindows().map(w => w.getTitle())"
 
 const PORT = 9230;
 const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();

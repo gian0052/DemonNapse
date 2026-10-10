@@ -1,4 +1,4 @@
-//! Abbina a ogni profilo Synapse il suo effetto Chroma e prepara gli effetti da disegnare.
+//! Matches each Synapse profile with its Chroma effect and prepares the effects to draw.
 
 use crate::config::Config;
 use crate::effect::Effect;
@@ -14,7 +14,7 @@ fn tokens(name: &str) -> HashSet<String> {
     name.split(|c: char| !c.is_ascii_alphanumeric()).filter(|t| !t.is_empty()).map(String::from).collect()
 }
 
-/// Effetto Chroma per un profilo Synapse: override esplicito, poi parole in comune nei nomi.
+/// Chroma effect for a Synapse profile: explicit override, then words in common in the names.
 pub fn match_effect<'a>(profile: &str, titles: impl Iterator<Item = &'a String>, overrides: &'a HashMap<String, String>) -> Option<&'a String> {
     if let Some(title) = overrides.get(profile) {
         return Some(title);
@@ -36,7 +36,7 @@ pub struct Active {
     pub effect: Effect,
 }
 
-/// I profili da seguire (in ordine di slot, senza quelli in `skip_slots`), ognuno col suo effetto.
+/// The profiles to follow (in slot order, without those in `skip_slots`), each with its effect.
 pub fn load(dir: &Path, cfg: &Config, grid: &HashMap<(i64, i64), usize>, canvas: &Canvas, seed: u64) -> Result<Vec<Active>, String> {
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"));
     let dump: Map<String, Value> = serde_json::from_str(&read("chroma_effects_dump.json")?).map_err(|e| format!("chroma_effects_dump.json: {e}"))?;

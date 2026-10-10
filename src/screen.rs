@@ -1,8 +1,8 @@
-//! Lettura di pochi pixel dello schermo principale per il layer Ambient, con DXGI Desktop
-//! Duplication: la GPU copia solo i pixel che servono in una piccola texture che si legge dalla
-//! CPU; se lo schermo non e' cambiato non si legge niente. Si apre solo quando l'effetto attivo
-//! ha un Ambient, e si chiude con lui.
-//! (GDI e' stato scartato: ogni BitBlt dallo schermo aspetta il compositore, ~16 ms.)
+//! Reads a few pixels of the primary screen for the Ambient layer, with DXGI Desktop
+//! Duplication: the GPU copies only the pixels needed into a small texture that is read from the
+//! CPU; if the screen has not changed nothing is read. It is opened only when the active effect
+//! has an Ambient, and is closed with it.
+//! (GDI was ruled out: every BitBlt from the screen waits for the compositor, ~16 ms.)
 
 use crate::layers::Rgb;
 use windows::core::Interface;
@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_OUTDUPL_FRAME_INFO,
 };
 
-const STRIP_W: u32 = 8192; // una riga della griglia = una striscia di pixel
+const STRIP_W: u32 = 8192; // one row of the grid = one strip of pixels
 const MAX_ROWS: u32 = 64;
 
 pub struct Screen {
@@ -25,16 +25,16 @@ pub struct Screen {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     dup: Option<IDXGIOutputDuplication>,
-    seen: bool,  // almeno una lettura fatta: finche' no, lo schermo fermo si legge con GDI
+    seen: bool,  // at least one reading done: until then, a still screen is read with GDI
     staging: [ID3D11Texture2D; 2],
-    pending: Option<usize>, // texture con una copia in viaggio sulla GPU, da leggere al prossimo giro
+    pending: Option<usize>, // texture with a copy in flight on the GPU, to be read on the next pass
     next: usize,
     size: (i32, i32),
 }
 
 impl Screen {
-    /// Schermo invariato. Pero' la duplicazione consegna un'immagine solo quando qualcosa cambia:
-    /// se non ne ho ancora vista una (schermo fermo dall'apertura) leggo i pixel una volta con GDI.
+    /// Screen unchanged. But the duplication delivers an image only when something changes:
+    /// if I have not seen one yet (screen still since it was opened) I read the pixels once with GDI.
     fn still(&mut self, requests: &[(Vec<i32>, Vec<i32>)]) -> Option<Vec<Vec<Rgb>>> {
         if self.seen {
             return None;
@@ -43,7 +43,7 @@ impl Screen {
         Some(requests.iter().map(|(xs, ys)| gdi_sample(xs, ys)).collect())
     }
 
-    /// Lo schermo principale (quello con l'angolo in (0, 0) del desktop).
+    /// The primary screen (the one with its corner at (0, 0) of the desktop).
     pub fn open() -> Option<Screen> {
         unsafe {
             let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
@@ -95,15 +95,15 @@ impl Screen {
         }
     }
 
-    /// Larghezza e altezza dello schermo principale, in pixel.
+    /// Width and height of the primary screen, in pixels.
     pub fn size(&self) -> (i32, i32) {
         self.size
     }
 
-    /// Legge i pixel chiesti: per ogni richiesta (colonne, righe) i pixel riga per riga.
-    /// None = niente di nuovo (schermo invariato, o non leggibile ora, es. schermata di UAC).
-    /// La GPU copia i pixel di questo giro e li leggo al giro dopo (40 ms): cosi' non aspetto la
-    /// GPU, che costava piu' di tutto il resto.
+    /// Reads the requested pixels: for each request (columns, rows) the pixels row by row.
+    /// None = nothing new (screen unchanged, or not readable now, e.g. the UAC screen).
+    /// The GPU copies this pass's pixels and I read them on the next pass (40 ms): that way I do not
+    /// wait for the GPU, which cost more than everything else.
     pub fn capture(&mut self, requests: &[(Vec<i32>, Vec<i32>)]) -> Option<Vec<Vec<Rgb>>> {
         let out = self.pending.and_then(|i| self.read(i, requests));
         if out.is_some() {
@@ -116,8 +116,8 @@ impl Screen {
         out.or_else(|| self.still(requests))
     }
 
-    /// Copia i pixel dell'ultima immagine del desktop in una delle due texture. false = nessuna
-    /// immagine nuova.
+    /// Copies the pixels of the latest desktop image into one of the two textures. false = no
+    /// new image.
     fn copy(&mut self, requests: &[(Vec<i32>, Vec<i32>)]) -> bool {
         unsafe {
             if self.dup.is_none() {
@@ -132,11 +132,11 @@ impl Screen {
             let mut res: Option<IDXGIResource> = None;
             if let Err(e) = dup.AcquireNextFrame(0, &mut info, &mut res) {
                 if e.code() != DXGI_ERROR_WAIT_TIMEOUT {
-                    self.dup = None; // cambio di risoluzione, desktop protetto...: la riapro dopo
+                    self.dup = None; // resolution change, protected desktop...: I reopen it later
                 }
                 return false;
             }
-            // solo il cursore e' cambiato: l'immagine e' quella di prima
+            // only the cursor has changed: the image is the same as before
             let tex: Option<ID3D11Texture2D> = if info.LastPresentTime != 0 { res.and_then(|r| r.cast().ok()) } else { None };
             let Some(tex) = tex else {
                 let _ = dup.ReleaseFrame();
@@ -165,7 +165,7 @@ impl Screen {
         }
     }
 
-    /// Legge una texture copiata prima, se la GPU ha finito (altrimenti None, riprovo dopo).
+    /// Reads a texture copied earlier, if the GPU has finished (otherwise None, I retry later).
     fn read(&self, i: usize, requests: &[(Vec<i32>, Vec<i32>)]) -> Option<Vec<Vec<Rgb>>> {
         unsafe {
             let mut map = D3D11_MAPPED_SUBRESOURCE::default();
@@ -196,7 +196,7 @@ impl Screen {
     }
 }
 
-/// Lettura lenta con GDI (ogni copia dallo schermo aspetta il compositore): solo la prima volta.
+/// Slow read with GDI (every copy from the screen waits for the compositor): only the first time.
 fn gdi_sample(xs: &[i32], ys: &[i32]) -> Vec<Rgb> {
     use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC};
     unsafe {

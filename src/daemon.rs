@@ -1,6 +1,6 @@
-//! Il demone: capisce il profilo onboard attivo dagli eventi HID del mouse e disegna l'effetto
-//! Chroma abbinato. Quando Synapse si apre gli lascia il mouse, quando si chiude rilegge gli
-//! effetti dai suoi log e riprende.
+//! The daemon: works out the active on-board profile from the mouse's HID events and draws the
+//! matching Chroma effect. When Synapse opens it leaves the mouse to it; when Synapse closes it
+//! re-reads the effects from Synapse's logs and resumes.
 
 use crate::audio::PeakMeter;
 use crate::config::Config;
@@ -17,17 +17,17 @@ use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
-const VK_BUTTONS: [i32; 5] = [0x01, 0x02, 0x04, 0x05, 0x06]; // sx, dx, centrale, laterali
-const WALL_ADDR: &str = "127.0.0.1:47311"; // lo sfondo (wallpaper.py) ascolta qui
+const VK_BUTTONS: [i32; 5] = [0x01, 0x02, 0x04, 0x05, 0x06]; // left, right, middle, side buttons
+const WALL_ADDR: &str = "127.0.0.1:47311"; // the wallpaper (wallpaper.py) listens here
 const CONTROL_RETRIES: u32 = 5;
 
-/// Il gesto "luci on/off": `clicks` cambi di slot entro `window` secondi. Il pulsante dei profili
-/// lo gestisce il firmware e al PC arriva solo il cambio di slot, quindi si contano quelli.
+/// The "lights on/off" gesture: `clicks` slot changes within `window` seconds. The profile button
+/// is handled by the firmware and the PC only gets the slot change, so those are what is counted.
 struct Burst {
     clicks: usize,
     window: f64,
     times: Vec<f64>,
-    home: u8, // lo slot da cui e' partita la raffica, da rimettere
+    home: u8, // the slot the burst started from, to be put back
 }
 
 impl Burst {
@@ -35,7 +35,7 @@ impl Burst {
         Burst { clicks, window, times: Vec::new(), home: 0 }
     }
 
-    /// Un cambio di slot partito da `from`: true se completa il gesto.
+    /// A slot change that started from `from`: true if it completes the gesture.
     fn change(&mut self, from: u8, now: f64) -> bool {
         if self.clicks == 0 {
             return false;
@@ -53,16 +53,16 @@ impl Burst {
     }
 }
 
-/// Legge lo slot attivo dal mouse; gli slot non configurati (es. la Hybrid Storage) vengono
-/// saltati passando al successivo configurato.
+/// Reads the active slot from the mouse; slots that are not configured (e.g. Hybrid Storage) are
+/// skipped by moving on to the next configured one.
 struct ProfileTracker {
     slots: Vec<u8>,
     idx: usize,
     last_poll: f64,
-    raw: u8, // ultimo slot letto o impostato sul mouse
+    raw: u8, // last slot read from or set on the mouse
     burst: Burst,
-    hold_until: f64, // dopo il gesto i clic in piu' della raffica vengono annullati
-    toggled: bool,   // il gesto e' stato fatto: lo raccoglie il ciclo principale
+    hold_until: f64, // after the gesture the burst's extra clicks are undone
+    toggled: bool,   // the gesture was made: the main loop picks it up
 }
 
 impl ProfileTracker {
@@ -72,7 +72,7 @@ impl ProfileTracker {
         t
     }
 
-    /// Ritorna true se il profilo attivo e' cambiato.
+    /// Returns true if the active profile changed.
     fn refresh(&mut self, ctl: &HidDevice, now: f64) -> bool {
         self.last_poll = now;
         let Some(mut slot) = razerhid::get_active_profile(ctl) else { return false };
@@ -100,14 +100,14 @@ impl ProfileTracker {
         changed
     }
 
-    /// Qualunque evento "05 xx" (DPI, rotella, cambio profilo) -> rilegge lo slot.
+    /// Any "05 xx" event (DPI, scroll wheel, profile switch) -> re-reads the slot.
     fn feed(&mut self, ctl: &HidDevice, report: &[u8], now: f64) -> bool {
         report.len() >= 2 && report[0] == 0x05 && self.refresh(ctl, now)
     }
 }
 
-/// Effetti, profili e mappa dei LED dai log di Synapse, scritti in `dir`. La mappa non blocca il resto:
-/// puo' anche essere scritta a mano in config.json.
+/// Effects, profiles and LED map from Synapse's logs, written to `dir`. The map does not block the rest:
+/// it can also be written by hand in config.json.
 fn extract_all(dir: &Path) -> Result<(), String> {
     let pid = Config::load(dir)?.mouse()?;
     extract::effects(dir)?;
@@ -118,7 +118,7 @@ fn extract_all(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Synapse e' aperto: gli lascio il mouse e i servizi, e aspetto.
+/// Synapse is open: I leave it the mouse and the services, and wait.
 fn wait_for_synapse_to_close(dir: &Path) {
     info!("Synapse opened: pausing");
     synapse::services(true);
@@ -129,15 +129,15 @@ fn wait_for_synapse_to_close(dir: &Path) {
     if let Err(e) = extract_all(dir) {
         info!("reading effects failed, keeping the previous ones: {e}");
     }
-    sleep(Duration::from_secs(2)); // lascio finire i processi figli di Synapse
+    sleep(Duration::from_secs(2)); // I let Synapse's child processes finish
     synapse::kill_razer_apps();
     synapse::services(false);
 }
 
-/// Una "sessione" tra un'apertura di Synapse e l'altra. Ritorna Ok quando Synapse compare.
-/// `dark`: luci spente col gesto del pulsante profili; resta tale anche dopo una pausa per Synapse.
+/// A "session" between one opening of Synapse and the next. Returns Ok when Synapse appears.
+/// `dark`: lights turned off with the profile button gesture; it stays so even after a pause for Synapse.
 fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpSocket>, last_error: &mut String, dark: &mut bool) -> Result<(), String> {
-    // prima installazione: i file estratti non ci sono ancora, li leggo subito dai log di Synapse
+    // first install: the extracted files are not there yet, I read them from Synapse's logs right away
     if ["chroma_effects_dump.json", "synapse_profiles.json", "synapse_device.json"].iter().any(|f| !dir.join(f).exists()) {
         extract_all(dir)?;
         info!("effects, profiles and LED map read from Synapse's logs");
@@ -155,7 +155,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         info!("mouse: {how}");
     }
     let (ctl, _) = razerhid::open_control(&mut api, pid, CONTROL_RETRIES)?;
-    // Synapse chiuso di forza lascia il mouse in modo driver: il pulsante dei profili non cambia piu' slot
+    // a force-closed Synapse leaves the mouse in driver mode: the profile button no longer switches slot
     if let Some(mode @ 1..) = razerhid::get_device_mode(&ctl) {
         let ok = razerhid::set_device_mode(&ctl, 0);
         info!("mouse in mode {mode} (driver): set back to normal mode{}", if ok { "" } else { " - FAILED" });
@@ -182,21 +182,21 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
         if t - last_syn > 1.5 {
             last_syn = t;
             if synapse::running() {
-                return Ok(()); // Synapse e' comparso: mollo il mouse
+                return Ok(()); // Synapse has appeared: I let go of the mouse
             }
         }
 
         let mut changed = false;
         for h in &events {
-            // timeout di 1 ms e non lettura non bloccante: con timeout 0 il backend Windows di hidapi
-            // prende ERROR_IO_INCOMPLETE per un errore, abbandona la lettura in corso e perde gli eventi
+            // a 1 ms timeout and not a non-blocking read: with timeout 0 hidapi's Windows backend
+            // takes ERROR_IO_INCOMPLETE for an error, abandons the read in progress and loses the events
             while let Ok(n @ 1..) = h.read_timeout(&mut buf, 1) {
                 debug!("event {}", buf[..n.min(6)].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" "));
                 changed |= tracker.feed(&ctl, &buf[..n], t);
             }
         }
         if t - tracker.last_poll > 30.0 {
-            changed |= tracker.refresh(&ctl, t); // rete di sicurezza se un evento si perde
+            changed |= tracker.refresh(&ctl, t); // safety net in case an event is lost
         }
         if changed {
             for (k, a) in active.iter_mut().enumerate() {
@@ -235,7 +235,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
             let peak = if fx.has_audio() { meter.peak() } else { 0.0 };
             fx.render(t, dt, peak)
         };
-        // reinvio solo se cambia; keepalive ogni secondo (il firmware puo' ridisegnare il suo effetto)
+        // resend only if it changes; keepalive every second (the firmware may redraw its own effect)
         if last_frame.as_ref() != Some(&frame) || t - last_sent > 1.0 {
             razerhid::custom_frame(&ctl, &frame).map_err(|e| format!("sending to the mouse failed: {e}"))?;
             if let Some(wall) = wall {
@@ -251,7 +251,7 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
 }
 
 pub fn run(dir: &Path) {
-    // una sola istanza: due demoni sullo stesso mouse si pestano i piedi
+    // a single instance: two daemons on the same mouse get in each other's way
     let mutex = unsafe { CreateMutexW(None, true, w!("Local\\demonnapse")) };
     if mutex.is_err() || unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         info!("DemonNapse is already running, exiting");
@@ -271,7 +271,7 @@ pub fn run(dir: &Path) {
         match session(dir, clock, &mut meter, wall.as_ref(), &mut last_error, &mut dark) {
             Ok(()) => wait_for_synapse_to_close(dir),
             Err(e) => {
-                // mouse scollegato, file mancanti...: riprovo finche' non torna, senza riempire il log
+                // mouse unplugged, missing files...: I retry until it comes back, without filling the log
                 if e != last_error {
                     info!("error: {e}; retrying every 5 seconds");
                     last_error = e;
@@ -295,12 +295,12 @@ mod tests {
         let from = [2, 3, 4, 2, 3];
         let got: Vec<bool> = from.iter().enumerate().map(|(i, &s)| b.change(s, 10.0 + i as f64 * 0.3)).collect();
         assert_eq!(got, [false, false, false, false, true]);
-        assert_eq!(b.home, 2, "si torna allo slot da cui e' partita la raffica");
+        assert_eq!(b.home, 2, "back to the slot the burst started from");
 
         let mut slow = Burst::new(5, 1.5);
-        assert!(!(0..10).any(|i| slow.change(2, i as f64 * 0.5)), "un clic ogni mezzo secondo non basta");
+        assert!(!(0..10).any(|i| slow.change(2, i as f64 * 0.5)), "one click every half second is not enough");
 
         let mut off = Burst::new(0, 1.5);
-        assert!(!(0..10).any(|i| off.change(2, i as f64 * 0.01)), "0 = gesto disattivato");
+        assert!(!(0..10).any(|i| off.change(2, i as f64 * 0.01)), "0 = gesture disabled");
     }
 }

@@ -1,8 +1,8 @@
-//! Protocollo HID Razer minimale (formato dei report dal wiki di OpenRazer).
+//! Minimal Razer HID protocol (report format from the OpenRazer wiki).
 //!
-//! Profili on-board (classe 0x05), verificati sul Basilisk V3 35K:
-//!   get 0x80 = numero profili, 0x81 = [capienza, slot...], 0x84 = slot attivo
-//!   set 0x04 = cambia slot attivo (il mouse emette gli stessi eventi del pulsante)
+//! On-board profiles (class 0x05), verified on the Basilisk V3 35K:
+//!   get 0x80 = number of profiles, 0x81 = [capacity, slots...], 0x84 = active slot
+//!   set 0x04 = switches the active slot (the mouse emits the same events as the button)
 
 use crate::layers::Rgb;
 use hidapi::{HidApi, HidDevice};
@@ -11,8 +11,8 @@ use std::thread::sleep;
 use std::time::Duration;
 
 pub const VID: u16 = 0x1532;
-/// Transaction id dei report: 0x1F sui dispositivi recenti (35K compreso), 0x3F o 0xFF su altri
-/// (tabella dei dispositivi di OpenRazer). `open_control` li prova e tiene quello a cui il mouse risponde.
+/// Transaction id of the reports: 0x1F on recent devices (35K included), 0x3F or 0xFF on others
+/// (OpenRazer's device table). `open_control` tries them and keeps the one the mouse answers to.
 const TRANSACTION_IDS: [u8; 3] = [0x1F, 0x3F, 0xFF];
 static TRANSACTION_ID: AtomicU8 = AtomicU8::new(0x1F);
 
@@ -47,14 +47,14 @@ pub fn transact(h: &HidDevice, report: &[u8; 90]) -> Result<[u8; 90], String> {
     Ok(resp)
 }
 
-/// Trova la collection che accetta i feature report da 90 byte e il transaction id del mouse.
-/// Ritorna anche la risposta alla sonda (versione firmware, sola lettura).
+/// Finds the collection that accepts the 90-byte feature reports and the mouse's transaction id.
+/// Also returns the response to the probe (firmware version, read only).
 pub fn open_control(api: &mut HidApi, pid: u16, retries: u32) -> Result<(HidDevice, [u8; 90]), String> {
     for attempt in 0..retries {
         let _ = api.refresh_devices();
         for info in api.device_list().filter(|d| d.vendor_id() == VID && d.product_id() == pid) {
             let Ok(h) = info.open_device(api) else { continue };
-            // sempre nello stesso ordine: un mouse che accetta qualunque id (il 35K) resta su 0x1F
+            // always in the same order: a mouse that accepts any id (the 35K) stays on 0x1F
             for tid in TRANSACTION_IDS {
                 TRANSACTION_ID.store(tid, Ordering::Relaxed);
                 if let Ok(resp) = transact(&h, &build(0x00, 0x81, 0x02, &[])) {
@@ -65,13 +65,13 @@ pub fn open_control(api: &mut HidApi, pid: u16, retries: u32) -> Result<(HidDevi
             }
         }
         if attempt + 1 < retries {
-            sleep(Duration::from_secs(1)); // un'altra istanza sta morendo o il mouse e' occupato
+            sleep(Duration::from_secs(1)); // another instance is dying or the mouse is busy
         }
     }
     Err("no control interface found".into())
 }
 
-/// I dispositivi Razer collegati, uno per PID, con il nome che danno a Windows.
+/// The connected Razer devices, one per PID, with the name they give to Windows.
 pub fn connected(api: &HidApi) -> Vec<(u16, String)> {
     let mut seen: Vec<(u16, String)> = Vec::new();
     for d in api.device_list().filter(|d| d.vendor_id() == VID) {
@@ -84,7 +84,7 @@ pub fn connected(api: &HidApi) -> Vec<(u16, String)> {
     seen
 }
 
-/// Le collection da cui arrivano gli eventi "05 xx" (DPI, rotella, cambio profilo).
+/// The collections the "05 xx" events come from (DPI, scroll wheel, profile switch).
 pub fn open_events(api: &HidApi, pid: u16) -> Vec<HidDevice> {
     api.device_list()
         .filter(|d| d.vendor_id() == VID && d.product_id() == pid && d.usage_page() == 0x0001 && d.usage() == 0x0000)
@@ -93,15 +93,15 @@ pub fn open_events(api: &HidApi, pid: u16) -> Vec<HidDevice> {
         .collect()
 }
 
-/// Colore per singolo LED (effetto 0x0F/0x03). Solo invio: il mouse non risponde a ogni frame.
+/// Colour per single LED (effect 0x0F/0x03). Send only: the mouse does not answer every frame.
 pub fn custom_frame(h: &HidDevice, colors: &[Rgb]) -> Result<(), String> {
     let mut args = vec![0, 0, 0, 0, colors.len().saturating_sub(1) as u8];
     args.extend(colors.iter().flat_map(|c| [c.0, c.1, c.2]));
     send(h, &build(0x0F, 0x03, args.len() as u8, &args))
 }
 
-/// Modo del mouse: 0 = normale (i pulsanti li gestisce il mouse, profili on-board compresi),
-/// 3 = driver (li manda al software: e' il modo in cui lo lascia Synapse se viene chiuso di forza).
+/// Mouse mode: 0 = normal (the buttons are handled by the mouse, on-board profiles included),
+/// 3 = driver (it sends them to the software: it is the mode Synapse leaves it in if it is force-closed).
 pub fn get_device_mode(h: &HidDevice) -> Option<u8> {
     let resp = transact(h, &build(0x00, 0x84, 0x02, &[])).ok()?;
     (resp[0] == 0x02).then_some(resp[8])

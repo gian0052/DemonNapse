@@ -1,7 +1,7 @@
-//! `demonnapse check [PID]`: prova passo passo se un mouse Razer funziona con DemonNapse e stampa
-//! un rapporto da incollare in una issue. Serve a chi ha un modello diverso dal Basilisk V3 35K.
-//! Solo letture, piu' il cambio di slot attivo (come il pulsante, poi torna com'era) e qualche
-//! colore sui LED: niente viene scritto nella memoria del mouse.
+//! `demonnapse check [PID]`: tests step by step whether a Razer mouse works with DemonNapse and prints
+//! a report to paste into an issue. It is for people with a model other than the Basilisk V3 35K.
+//! Reads only, plus switching the active slot (like the button, then back as it was) and a few
+//! colours on the LEDs: nothing is written to the mouse's memory.
 
 use crate::config::Config;
 use crate::layers::Rgb;
@@ -28,7 +28,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
 }
 
-/// Risposta grezza a un comando di lettura, se il mouse risponde "ok" (stato 0x02).
+/// Raw response to a read command, if the mouse answers "ok" (status 0x02).
 fn query(h: &HidDevice, class: u8, id: u8, size: u8) -> Option<[u8; 90]> {
     razerhid::transact(h, &razerhid::build(class, id, size, &[])).ok().filter(|r| r[0] == 0x02)
 }
@@ -45,7 +45,7 @@ fn show(h: &HidDevice, leds: usize, color: impl Fn(usize) -> Rgb, seconds: f64) 
 }
 
 pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
-    // lo stesso lucchetto del demone: due programmi sullo stesso mouse si mescolano le risposte
+    // the same lock as the daemon: two programs on the same mouse get each other's responses mixed up
     let _mutex = unsafe { CreateMutexW(None, true, w!("Local\\demonnapse")) };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         return Err("the daemon is running: stop it first (schtasks /End /TN DemonNapse), then run check again".into());
@@ -107,12 +107,12 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     println!("  active slot (05/84): {}", active.map_or("NO".into(), |s| s.to_string()));
     let mut switch_ok = None;
     if let (Some(from), Some(r)) = (active, slots) {
-        // 05/81 = [capienza, slot...]: provo a passare a un altro slot e torno indietro
-        // di preferenza non lo slot 1 (Hybrid Storage sul 35K): il demone salta verso gli slot normali
+        // 05/81 = [capacity, slots...]: I try switching to another slot and back
+        // preferably not slot 1 (Hybrid Storage on the 35K): the daemon jumps towards the normal slots
         let list: Vec<u8> = r[9..9 + (r[8] as usize).min(8)].iter().copied().filter(|&s| s != 0 && s != from).collect();
         if let Some(to) = list.iter().copied().find(|&s| s != 1).or(list.first().copied()) {
             let go = |slot: u8| razerhid::set_active_profile(&ctl, slot) && { sleep(Duration::from_millis(300)); razerhid::get_active_profile(&ctl) == Some(slot) };
-            // un secondo tentativo: se nel frattempo qualcuno preme il pulsante il primo va a vuoto
+            // a second attempt: if someone presses the button in the meantime the first one fails
             let ok = (0..2).any(|_| go(to) && go(from));
             if !ok {
                 razerhid::set_active_profile(&ctl, from);
@@ -150,7 +150,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     let button_ok = slots_seen.len() > 1;
     println!("  event interfaces: {}, \"05 xx\" events: {n_events}, slot changed: {}", events.len(), yes(button_ok));
     if let (Some(from), true) = (active, button_ok) {
-        razerhid::set_active_profile(&ctl, from); // rimetto lo slot di partenza
+        razerhid::set_active_profile(&ctl, from); // I put the starting slot back
     }
 
     println!("\n[6] LEDs: watch the mouse (red, green, blue, then one LED at a time in white)");

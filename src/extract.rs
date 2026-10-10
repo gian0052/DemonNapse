@@ -1,6 +1,6 @@
-//! Legge dai log di Synapse l'ultima definizione di ogni effetto Chroma Studio, i profili
-//! del mouse con il loro slot onboard e la mappa dei LED del mouse. Scrive chroma_effects_dump.json,
-//! synapse_profiles.json e synapse_device.json.
+//! Reads from Synapse's logs the latest definition of every Chroma Studio effect, the mouse's
+//! profiles with their on-board slot and the mouse's LED map. Writes chroma_effects_dump.json,
+//! synapse_profiles.json and synapse_device.json.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -16,7 +16,7 @@ fn logs_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join(r"Razer\RazerAppEngine\User Data\Logs")
 }
 
-/// Il testo di tutti i log `<prefisso>*.log`, dal piu' vecchio al piu' recente: cosi' l'ultima occorrenza vince.
+/// The text of all the `<prefix>*.log` logs, from the oldest to the newest: that way the last occurrence wins.
 fn read_logs(prefix: &str) -> String {
     let prefix = prefix.to_lowercase();
     let mut files: Vec<_> = std::fs::read_dir(logs_dir())
@@ -33,7 +33,7 @@ fn read_logs(prefix: &str) -> String {
     files.iter().filter_map(|(_, p)| std::fs::read(p).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()).collect()
 }
 
-/// Il primo valore JSON all'inizio di `txt`, ignorando quello che segue.
+/// The first JSON value at the start of `txt`, ignoring what follows.
 fn decode_prefix(txt: &str) -> Option<Value> {
     serde_json::Deserializer::from_str(txt).into_iter::<Value>().next()?.ok()
 }
@@ -45,7 +45,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// {titolo: effetto}, scritto anche in `dir`/chroma_effects_dump.json.
+/// {title: effect}, also written to `dir`/chroma_effects_dump.json.
 pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
     let txt = read_logs("chroma-studio");
     let mut effects = Map::new();
@@ -58,11 +58,11 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
         };
         let mut start = at;
         for _ in 0..6 {
-            // risale all'oggetto JSON che contiene il titolo
+            // walks back to the JSON object that contains the title
             let Some(s) = txt[..start].rfind('{') else { break };
             start = s;
-            // un effetto e' l'oggetto con i layer e con proprio quel titolo: cosi' i titoli dei layer
-            // (STATIC, WAVE...) non diventano effetti e un effetto rinominato viene letto lo stesso
+            // an effect is the object with the layers and with exactly that title: that way the layers' titles
+            // (STATIC, WAVE...) do not become effects and a renamed effect is read all the same
             if let Some(obj) = decode_prefix(&txt[start..]).filter(|o| o.get("layers").is_some() && o["title"] == title) {
                 effects.insert(title.to_string(), obj);
                 break;
@@ -70,7 +70,7 @@ pub fn effects(dir: &Path) -> Result<Map<String, Value>, String> {
         }
     }
     if effects.is_empty() {
-        return Err("no Chroma effect in Synapse's logs".into()); // non sovrascrivo un dump buono con uno vuoto
+        return Err("no Chroma effect in Synapse's logs".into()); // I do not overwrite a good dump with an empty one
     }
     write_json(&dir.join("chroma_effects_dump.json"), &effects)?;
     Ok(effects)
@@ -82,11 +82,11 @@ pub struct Profile {
     pub slot: u8,
 }
 
-/// Profili Synapse del mouse con il loro slot onboard, dai log del modulo mouse (`pid` in decimale
-/// nel nome del file). Scritti anche in `dir`/synapse_profiles.json.
+/// The mouse's Synapse profiles with their on-board slot, from the mouse module's logs (`pid` in decimal
+/// in the file name). Also written to `dir`/synapse_profiles.json.
 pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
     let txt = read_logs(&format!("products_{pid}_mw"));
-    let mut last: Vec<(String, Profile)> = Vec::new(); // per guid, nell'ordine in cui compaiono
+    let mut last: Vec<(String, Profile)> = Vec::new(); // by guid, in the order they appear
     let mut from = 0;
     while let Some(i) = txt[from..].find(PROFILE_KEY) {
         let at = from + i;
@@ -105,7 +105,7 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
             None => last.push((guid.to_string(), profile)),
         }
     }
-    // se due profili risultano sullo stesso slot vince l'ultimo visto
+    // if two profiles turn out to be on the same slot the last one seen wins
     let by_slot: BTreeMap<u8, Profile> = last.into_iter().map(|(_, p)| (p.slot, p)).collect();
     let profiles: Vec<Profile> = by_slot.into_values().collect();
     if profiles.is_empty() {
@@ -115,18 +115,18 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
     Ok(profiles)
 }
 
-/// Il mouse come lo vede Chroma Studio: PID, numero di LED e griglia "riga,colonna" -> indice LED fisico.
+/// The mouse as Chroma Studio sees it: PID, number of LEDs and grid "row,column" -> physical LED index.
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct DeviceMap {
     #[serde(default)]
-    pub pid: u16, // il mouse a cui appartiene la mappa
+    pub pid: u16, // the mouse the map belongs to
     pub leds: usize,
     pub chroma_grid: BTreeMap<String, usize>,
 }
 
-/// L'ultima scheda del dispositivo `pid` in `txt`. Synapse la scrive come
+/// The last record of device `pid` in `txt`. Synapse writes it as
 /// `"config":{"Version":2,"VID":5426,"PID":203,...,"DeviceMaxRow":1,"DeviceMaxCol":11,...,
-/// "LedMatrix":[{"MatrixPos":[riga,colonna],"DevicePos":[riga,colonna]},...]}`.
+/// "LedMatrix":[{"MatrixPos":[row,column],"DevicePos":[row,column]},...]}`.
 fn device_from(txt: &str, pid: u16) -> Option<DeviceMap> {
     let mut found = None;
     let mut from = 0;
@@ -155,7 +155,7 @@ fn device_from(txt: &str, pid: u16) -> Option<DeviceMap> {
     found
 }
 
-/// La mappa dei LED del mouse `pid` dai log di Chroma Studio e del motore luci, scritta anche in
+/// The LED map of mouse `pid` from the logs of Chroma Studio and of the lighting engine, also written to
 /// `dir`/synapse_device.json.
 pub fn device(dir: &Path, pid: u16) -> Result<DeviceMap, String> {
     let map = ["chroma-studio", "lighting-engine"]
@@ -166,8 +166,8 @@ pub fn device(dir: &Path, pid: u16) -> Result<DeviceMap, String> {
     Ok(map)
 }
 
-/// Il tipo di ogni dispositivo come lo scrive Synapse nella sua scheda
-/// (`{..."productId":203,...,"category":"mouse",...}`), per PID; l'ultima occorrenza vince.
+/// The type of every device as Synapse writes it in its record
+/// (`{..."productId":203,...,"category":"mouse",...}`), by PID; the last occurrence wins.
 fn categories_from(txt: &str) -> HashMap<u16, String> {
     let mut found = HashMap::new();
     let mut from = 0;
@@ -175,7 +175,7 @@ fn categories_from(txt: &str) -> HashMap<u16, String> {
         let at = from + i;
         from = at + CATEGORY_KEY.len();
         let Some(category) = txt[from..].find('"').map(|n| &txt[from..from + n]) else { break };
-        // il productId sta nello stesso oggetto, prima della categoria
+        // the productId is in the same object, before the category
         let start = txt[..at].rfind('{').unwrap_or(0);
         let Some(p) = txt[start..at].rfind("\"productId\":") else { continue };
         let digits: String = txt[start + p + "\"productId\":".len()..at].chars().take_while(char::is_ascii_digit).collect();
@@ -186,14 +186,14 @@ fn categories_from(txt: &str) -> HashMap<u16, String> {
     found
 }
 
-/// Il tipo di ogni dispositivo Razer che Synapse conosce ("mouse", "keyboard"...), per PID.
+/// The type of every Razer device Synapse knows ("mouse", "keyboard"...), by PID.
 pub fn categories() -> HashMap<u16, String> {
     let mut all = categories_from(&read_logs("lighting-engine"));
     all.extend(categories_from(&read_logs("chroma-studio")));
     all
 }
 
-/// Riassunto di un effetto, una riga per regione.
+/// Summary of an effect, one line per region.
 pub fn summary(title: &str, effect: &Value) -> String {
     let mut out = format!("\n== {title}");
     for layer in effect["layers"].as_array().into_iter().flatten() {
@@ -213,13 +213,13 @@ mod tests {
 
     #[test]
     fn device_map_from_the_log() {
-        // come la scrive Synapse per il Basilisk V3 35K (ridotta a 3 LED), preceduta da un altro dispositivo
+        // as Synapse writes it for the Basilisk V3 35K (cut down to 3 LEDs), followed by another device
         let other = r#""config":{"Version":2,"VID":5426,"PID":99,"DeviceMaxRow":1,"DeviceMaxCol":2,"LedMatrix":[{"MatrixPos":[0,0],"DevicePos":[0,0]}]}"#;
         let mouse = r#""config":{"Version":2,"VID":5426,"PID":203,"EID":0,"MatrixMaxRow":7,"MatrixMaxCol":5,"DeviceMaxRow":1,"DeviceMaxCol":3,"LedMatrix":[{"MatrixPos":[0,2],"DevicePos":[0,1]},{"MatrixPos":[5,2],"DevicePos":[0,0]},{"MatrixPos":[6,4],"DevicePos":[0,2]},{"MatrixPos":[6,0],"DevicePos":[0,7]}]}"#;
         let map = device_from(&format!("x {mouse} y {other} z"), 203).unwrap();
         assert_eq!(map.leds, 3);
         let want: BTreeMap<String, usize> = [("0,2", 1), ("5,2", 0), ("6,4", 2)].iter().map(|(k, v)| (k.to_string(), *v)).collect();
-        assert_eq!(map.chroma_grid, want, "il LED 7 non esiste su un mouse da 3 LED: scartato");
+        assert_eq!(map.chroma_grid, want, "LED 7 does not exist on a 3-LED mouse: discarded");
         assert!(device_from(mouse, 0x00CC).is_none());
     }
 
@@ -229,6 +229,6 @@ mod tests {
         let c = categories_from(txt);
         assert_eq!(c.get(&203).map(String::as_str), Some("mouse"));
         assert_eq!(c.get(&655).map(String::as_str), Some("keyboard"));
-        assert_eq!(c.len(), 2, "una categoria senza productId non conta");
+        assert_eq!(c.len(), 2, "a category without productId does not count");
     }
 }

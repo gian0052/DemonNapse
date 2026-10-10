@@ -1,5 +1,5 @@
-//! Un effetto di Chroma Studio pronto da disegnare: i layer di `layers.rs`, gli Audio Meter, gli
-//! Ambient e i Reactive impilati come in Chroma Studio (il primo della lista sta sopra).
+//! A Chroma Studio effect ready to draw: the layers of `layers.rs`, the Audio Meters, the
+//! Ambients and the Reactives stacked as in Chroma Studio (the first in the list is on top).
 
 use crate::ambient::{self, Ambient};
 use crate::config::Config;
@@ -8,22 +8,22 @@ use serde_json::Value;
 use crate::screen::Screen;
 use std::collections::HashMap;
 
-// Reactive, misurato con click veri sull'anteprima di Chroma Studio (2026-09-19): il lampo parte
-// col click, pieno, e scende in linea retta verso il nero in (floor(duration / 40 ms) - 1) scatti
-// da 40 ms (1500 ms -> 1,44 s, 500 ms -> 0,44 s); mentre dura copre i layer sotto (anche mentre
-// si spegne: sotto non si vede niente), finito torna trasparente. Un click durante il lampo lo fa
-// ripartire da capo (anche con un colore nuovo). Colori a caso: ogni canale 0, 128 o 255, mai nero.
+// Reactive, measured with real clicks on the Chroma Studio preview (2026-09-19): the flash starts
+// with the click, at full brightness, and falls in a straight line to black in (floor(duration / 40 ms) - 1) ticks
+// of 40 ms (1500 ms -> 1.44 s, 500 ms -> 0.44 s); while it lasts it covers the layers below (also while
+// it fades out: nothing shows underneath), once over it is transparent again. A click during the flash makes
+// it start over (also with a new colour). Random colours: each channel 0, 128 or 255, never black.
 const REACTIVE_TICK: f64 = 0.04;
 
-// Audio Meter, misurato sull'anteprima di Chroma Studio con toni a volume noto (2026-09-19):
-// tutti i LED della regione hanno lo stesso colore, quello del gradiente alla posizione
-// livello = min(picco * boost, 1) (il picco e' quello di IAudioMeterInformation, lineare);
-// il livello sale subito e scende in linea retta di 1/decay al secondo; a livello 0 il layer e'
-// trasparente, sopra 0 il colore e' pieno (nessuna soglia: 0,001 accende gia').
-// Auto boost (il cursore del boost e' ignorato), calcolato a scatti di 40 ms come il motore su
-// `env`, il picco dello scatto seguito per 7/8 della distanza in salita e 1/2 in discesa: se
-// `env` dello scatto prima supera 0,1 il boost e' min(4, 1 / massimo di `env`), altrimenti 1 e
-// il massimo si azzera; 0,2 s di silenzio assoluto azzerano tutto.
+// Audio Meter, measured on the Chroma Studio preview with tones at a known volume (2026-09-19):
+// all the LEDs of the region have the same colour, the gradient's colour at position
+// level = min(peak * boost, 1) (the peak is IAudioMeterInformation's, linear);
+// the level rises at once and falls in a straight line by 1/decay per second; at level 0 the layer is
+// transparent, above 0 the colour is full (no threshold: 0.001 already lights it).
+// Auto boost (the boost slider is ignored), computed in 40 ms ticks like the engine, on `env`,
+// which is the tick's peak followed for 7/8 of the distance when rising and 1/2 when falling: if
+// the previous tick's `env` exceeds 0.1 the boost is min(4, 1 / maximum of `env`), otherwise 1 and
+// the maximum is reset; 0.2 s of absolute silence reset everything.
 const AUTO_TICK: f64 = 0.04;
 const AUTO_ATTACK: f64 = 0.875;
 const AUTO_RELEASE: f64 = 0.5;
@@ -31,7 +31,7 @@ const AUTO_GATE: f64 = 0.1;
 const AUTO_MAX: f64 = 4.0;
 const AUTO_SILENCE: f64 = 0.2;
 
-/// Stato dell'auto boost di un Audio Meter.
+/// State of an Audio Meter's auto boost.
 struct AutoBoost {
     next_tick: Option<f64>,
     tick_peak: f64,
@@ -47,17 +47,17 @@ impl AutoBoost {
         AutoBoost { next_tick: None, tick_peak: 0.0, env: 0.0, gate: false, top: 0.0, quiet: 0.0, gain: 1.0 }
     }
 
-    /// Il boost da usare adesso; `peak` e' il picco letto in questo frame.
+    /// The boost to use now; `peak` is the peak read in this frame.
     fn feed(&mut self, now: f64, peak: f64) -> f64 {
         self.tick_peak = self.tick_peak.max(peak);
         let next = *self.next_tick.get_or_insert(now);
         if now >= next {
-            // dopo una pausa lunga conto uno scatto solo, ma il silenzio vale per intero
+            // after a long pause I count one tick only, but the silence counts in full
             let steps = ((now - next) / AUTO_TICK).floor() + 1.0;
             self.next_tick = Some(next + steps * AUTO_TICK);
             let p = std::mem::take(&mut self.tick_peak);
             self.quiet = if p == 0.0 { self.quiet + steps * AUTO_TICK } else { 0.0 };
-            let open = self.gate; // conta l'env dello scatto prima
+            let open = self.gate; // what counts is the previous tick's env
             if self.quiet >= AUTO_SILENCE - 1e-9 {
                 self.env = 0.0;
             } else if p > 0.0 {
@@ -80,7 +80,7 @@ struct Audio {
     level: f64,
 }
 
-/// Un elemento della pila dei layer.
+/// One item of the layer stack.
 enum Item {
     Layer(Layer),
     Audio(Audio),
@@ -88,8 +88,8 @@ enum Item {
     Reactive(Reactive),
 }
 
-/// I layer nell'ordine di Chroma Studio, con quelli dentro i gruppi (`type: "group"`) al posto
-/// del gruppo. Un gruppo nascosto nasconde tutti i suoi layer.
+/// The layers in Chroma Studio's order, with those inside groups (`type: "group"`) in place
+/// of the group. A hidden group hides all its layers.
 fn flatten<'a>(layers: &'a [Value], out: &mut Vec<&'a Value>) {
     for layer in layers {
         if layer.get("type").and_then(Value::as_str) == Some("group") {
@@ -104,24 +104,24 @@ fn flatten<'a>(layers: &'a [Value], out: &mut Vec<&'a Value>) {
 
 struct Reactive {
     leds: Vec<usize>,
-    color: Option<Rgb>, // None = colore a caso a ogni click
-    duration: f64,      // s, gia' ridotta agli scatti del motore
-    flash: Option<(Rgb, f64)>, // lampo in corso: colore e istante del click
+    color: Option<Rgb>, // None = random colour at every click
+    duration: f64,      // s, already reduced to the engine's ticks
+    flash: Option<(Rgb, f64)>, // flash in progress: colour and time of the click
 }
 
 pub struct Effect {
     pub title: String,
     num_leds: usize,
-    stack: Vec<Item>, // dal basso verso l'alto
+    stack: Vec<Item>, // from bottom to top
     gain: f64,
     rng: Rng,
-    screen: Option<Screen>, // aperto solo se l'effetto ha un Ambient
+    screen: Option<Screen>, // opened only if the effect has an Ambient
     next_capture: f64,
 }
 
 impl Effect {
-    /// `spec`: l'effetto come sta nel dump; `grid`: (riga, colonna) di Chroma Studio -> LED fisico.
-    /// Ritorna anche i nomi dei layer non supportati, da segnalare nel log.
+    /// `spec`: the effect as it is in the dump; `grid`: Chroma Studio (row, column) -> physical LED.
+    /// Also returns the names of the unsupported layers, to be reported in the log.
     pub fn new(spec: &Value, cfg: &Config, grid: &HashMap<(i64, i64), usize>, canvas: &Canvas, seed: u64) -> (Effect, Vec<String>) {
         let mut fx = Effect {
             title: spec.get("title").and_then(Value::as_str).unwrap_or("(senza nome)").to_string(),
@@ -136,7 +136,7 @@ impl Effect {
         let empty = Value::Object(Default::default());
         let mut layers = Vec::new();
         flatten(spec.get("layers").and_then(Value::as_array).map_or(&[], Vec::as_slice), &mut layers);
-        // in Chroma Studio il primo layer della lista sta sopra: applico dal fondo
+        // in Chroma Studio the first layer in the list is on top: I apply from the bottom
         for layer in layers.into_iter().rev() {
             if !layer.get("visible").and_then(Value::as_bool).unwrap_or(true) {
                 continue;
@@ -157,7 +157,7 @@ impl Effect {
                     "audio" => {
                         if let Some(st) = stops(p) {
                             let num = |k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d);
-                            // autoBoost: true/false dall'editor, 0/1 dagli effetti rapidi
+                            // autoBoost: true/false from the editor, 0/1 from the quick effects
                             let auto = p.get("autoBoost").and_then(|v| v.as_bool().or(v.as_f64().map(|n| n != 0.0))).unwrap_or(false);
                             let auto = auto.then(AutoBoost::new);
                             fx.stack.push(Item::Audio(Audio { leds, stops: st, boost: num("boost", 1.0), auto, decay: num("decay", 1.0), level: 0.0 }));
@@ -176,7 +176,7 @@ impl Effect {
                         Some(l) => fx.stack.push(Item::Layer(l)),
                         None => {
                             unsupported.push(name.to_string());
-                            break; // un avviso per layer, non uno per regione
+                            break; // one warning per layer, not one per region
                         }
                     },
                 }
@@ -185,7 +185,7 @@ impl Effect {
         (fx, unsupported)
     }
 
-    /// Un effetto spento, per i profili senza effetto abbinato.
+    /// An effect that is off, for profiles with no matching effect.
     pub fn off(cfg: &Config, canvas: &Canvas) -> Effect {
         Effect::new(&serde_json::json!({"title": "(spento)", "layers": []}), cfg, &HashMap::new(), canvas, 1).0
     }
@@ -206,7 +206,7 @@ impl Effect {
         }
     }
 
-    /// L'effetto non e' piu' quello attivo: chiudo la lettura dello schermo (Ambient).
+    /// The effect is no longer the active one: I close the screen reading (Ambient).
     pub fn sleep(&mut self) {
         self.screen = None;
         self.next_capture = 0.0;
@@ -222,7 +222,7 @@ impl Effect {
         }
     }
 
-    /// Ambient: legge lo schermo ogni 40 ms come il motore di Razer. Senza Ambient non apre nulla.
+    /// Ambient: reads the screen every 40 ms like Razer's engine. Without an Ambient it opens nothing.
     fn capture(&mut self, now: f64) {
         if now < self.next_capture || !self.stack.iter().any(|i| matches!(i, Item::Ambient(a) if a.points(1, 1).is_some())) {
             return;
@@ -234,7 +234,7 @@ impl Effect {
         let Some(screen) = self.screen.as_mut() else { return };
         let (w, h) = screen.size();
         let requests: Vec<_> = self.stack.iter().filter_map(|i| if let Item::Ambient(a) = i { a.points(w, h) } else { None }).collect();
-        // None = schermo invariato: i colori restano quelli di prima
+        // None = screen unchanged: the colours stay as they were
         let Some(samples) = screen.capture(&requests) else { return };
         let mut it = samples.iter();
         for item in self.stack.iter_mut() {
@@ -246,7 +246,7 @@ impl Effect {
         }
     }
 
-    /// `peak`: picco dell'uscita audio (0..1), letto dal chiamante solo se `has_audio()`.
+    /// `peak`: peak of the audio output (0..1), read by the caller only if `has_audio()`.
     pub fn render(&mut self, now: f64, dt: f64, peak: f64) -> Vec<Rgb> {
         self.capture(now);
         let mut frame = vec![BLACK; self.num_leds];
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn i_layer_dentro_un_gruppo_si_vedono() {
+    fn layers_inside_a_group_are_shown() {
         let red = json!({"name": "static", "visible": true, "regions": region(json!({"color": 0xFF0000}))});
         let mut fx = effect(json!({"layers": [{"type": "group", "visible": true, "layers": [red.clone()]}]}));
         assert_eq!(fx.render(0.0, 0.016, 0.0), vec![(255, 0, 0); 2]);
@@ -326,7 +326,7 @@ mod tests {
         fx.stack.iter().find_map(|i| if let Item::Audio(a) = i { Some(a.level) } else { None }).unwrap()
     }
 
-    /// Suona `secs` secondi a picco `peak` a 60 frame/s e ritorna il livello alla fine.
+    /// Plays `secs` seconds at peak `peak` at 60 frames/s and returns the level at the end.
     fn play(fx: &mut Effect, t: &mut f64, peak: f64, secs: f64) -> f64 {
         for _ in 0..(secs * 60.0).round() as usize {
             *t += 1.0 / 60.0;
@@ -336,56 +336,56 @@ mod tests {
     }
 
     #[test]
-    fn livello_uguale_al_picco_per_il_boost() {
+    fn level_equals_peak_times_boost() {
         let mut t = 0.0;
         assert!((play(&mut meter(json!({})), &mut t, 0.3, 0.5) - 0.3).abs() < 1e-9);
         assert!((play(&mut meter(json!({"boost": 2})), &mut t, 0.3, 0.5) - 0.6).abs() < 1e-9);
-        assert!((play(&mut meter(json!({"boost": 4})), &mut t, 0.001, 0.5) - 0.004).abs() < 1e-9); // nessuna soglia
+        assert!((play(&mut meter(json!({"boost": 4})), &mut t, 0.001, 0.5) - 0.004).abs() < 1e-9); // no threshold
         assert_eq!(play(&mut meter(json!({"boost": 4})), &mut t, 0.3, 0.5), 1.0);
     }
 
     #[test]
-    fn a_livello_zero_si_vede_il_layer_sotto() {
+    fn at_level_zero_the_layer_below_shows() {
         let blue = json!({"name": "static", "visible": true, "regions": region(json!({"color": 0x0000FF}))});
         let stops = json!([{"Stop": 0, "Color": 0x00FF00}, {"Stop": 100, "Color": 0xFF0000}]);
         let audio = json!({"name": "audio", "visible": true, "regions": region(json!({"boost": 1, "decay": 0.5, "colorStops": stops}))});
         let mut fx = effect(json!({"layers": [audio, blue]}));
         assert_eq!(fx.render(0.0, 0.0, 0.5)[0], (127, 127, 0));
-        assert_eq!(fx.render(0.1, 0.1, 0.0)[0], (76, 178, 0)); // 0,5 - 0,1 / 0,5 = 0,3
-        assert_eq!(fx.render(0.4, 0.3, 0.0)[0], (0, 0, 255)); // arrivato a 0: trasparente
+        assert_eq!(fx.render(0.1, 0.1, 0.0)[0], (76, 178, 0)); // 0.5 - 0.1 / 0.5 = 0.3
+        assert_eq!(fx.render(0.4, 0.3, 0.0)[0], (0, 0, 255)); // reached 0: transparent
     }
 
     #[test]
-    fn decay_di_default_un_secondo() {
+    fn default_decay_is_one_second() {
         let mut fx = meter(json!({}));
         fx.render(0.0, 0.0, 1.0);
         fx.render(0.5, 0.5, 0.0);
-        assert!((level(&fx) - 0.5).abs() < 1e-9, "livello {}", level(&fx));
+        assert!((level(&fx) - 0.5).abs() < 1e-9, "level {}", level(&fx));
     }
 
     #[test]
-    fn auto_boost_come_misurato_su_chroma_studio() {
+    fn auto_boost_as_measured_on_chroma_studio() {
         let mut fx = meter(json!({"autoBoost": true, "boost": 4, "decay": 0.1}));
         let mut t = 0.0;
-        // sotto 0,1 niente boost (e il cursore del boost e' ignorato)
+        // below 0.1 no boost (and the boost slider is ignored)
         assert!((play(&mut fx, &mut t, 0.08, 1.0) - 0.08).abs() < 1e-9);
-        // appena sopra 0,1: boost 4
+        // just above 0.1: boost 4
         assert!((play(&mut fx, &mut t, 0.102, 1.0) - 0.408).abs() < 1e-9);
-        // dopo 0,5 il riferimento resta 0,5 finche' il suono non scende sotto 0,1: 0,2 -> 0,4
+        // after 0.5 the reference stays 0.5 until the sound falls below 0.1: 0.2 -> 0.4
         assert_eq!(play(&mut fx, &mut t, 0.5, 1.0), 1.0);
         assert!((play(&mut fx, &mut t, 0.2, 25.0) - 0.4).abs() < 1e-9);
-        // 0,15 s di silenzio non azzerano il riferimento, 0,3 s si'
+        // 0.15 s of silence do not reset the reference, 0.3 s do
         play(&mut fx, &mut t, 0.5, 1.0);
         play(&mut fx, &mut t, 0.0, 0.15);
         assert!((play(&mut fx, &mut t, 0.2, 1.0) - 0.4).abs() < 1e-9);
         play(&mut fx, &mut t, 0.5, 1.0);
         play(&mut fx, &mut t, 0.0, 0.3);
         assert!((play(&mut fx, &mut t, 0.2, 1.0) - 0.8).abs() < 1e-9);
-        // scendere sotto 0,1 azzera il riferimento anche senza silenzio
+        // falling below 0.1 resets the reference even without silence
         play(&mut fx, &mut t, 0.5, 1.0);
         play(&mut fx, &mut t, 0.08, 1.0);
         assert!((play(&mut fx, &mut t, 0.2, 1.0) - 0.8).abs() < 1e-9);
-        // un picco a 1,0 per uno scatto porta il riferimento a 0,2 + 0,8 * 7/8 = 0,9
+        // a peak at 1.0 for one tick brings the reference to 0.2 + 0.8 * 7/8 = 0.9
         play(&mut fx, &mut t, 0.0, 1.0);
         play(&mut fx, &mut t, 0.2, 1.0);
         play(&mut fx, &mut t, 1.0, 1.0 / 60.0);
@@ -397,36 +397,36 @@ mod tests {
     }
 
     #[test]
-    fn reactive_lampo_misurato() {
-        // 1500 ms -> 36 scatti da 40 ms: 255, 247, 240 ... 7, poi spento (misurato con click veri)
+    fn reactive_flash_as_measured() {
+        // 1500 ms -> 36 ticks of 40 ms: 255, 247, 240 ... 7, then off (measured with real clicks)
         let mut fx = effect(json!({"layers": [reactive(json!({"color": 0xFF0000, "duration": 1500}))]}));
         fx.on_click(1.0);
         assert_eq!(fx.render(1.0, 0.0, 0.0)[0], (255, 0, 0));
-        assert_eq!(fx.render(1.04, 0.0, 0.0)[0].0, 247); // come Razer
+        assert_eq!(fx.render(1.04, 0.0, 0.0)[0].0, 247); // like Razer's engine
         assert_eq!(fx.render(2.44, 0.0, 0.0)[0], BLACK);
-        // un click durante il lampo lo fa ripartire da capo
+        // a click during the flash makes it start over
         fx.on_click(3.0);
         fx.on_click(3.5);
         assert_eq!(fx.render(3.5, 0.0, 0.0)[0], (255, 0, 0));
     }
 
     #[test]
-    fn reactive_rispetta_l_ordine_dei_layer() {
+    fn reactive_respects_the_layer_order() {
         let blue = json!({"name": "static", "visible": true, "regions": region(json!({"color": 0x0000FF}))});
         let red = reactive(json!({"color": 0xFF0000, "duration": 1500}));
-        // reactive sopra: mentre si spegne copre lo statico (misurato: 226,0,0 e niente blu)
+        // reactive on top: while it fades out it covers the static (measured: 226,0,0 and no blue)
         let mut fx = effect(json!({"layers": [red.clone(), blue.clone()]}));
         fx.on_click(0.0);
         assert_eq!(fx.render(0.72, 0.0, 0.0)[0], (127, 0, 0));
-        assert_eq!(fx.render(1.5, 0.0, 0.0)[0], (0, 0, 255), "finito il lampo torna lo statico");
-        // reactive sotto uno statico: non si vede
+        assert_eq!(fx.render(1.5, 0.0, 0.0)[0], (0, 0, 255), "once the flash is over the static is back");
+        // reactive below a static: it does not show
         let mut fx = effect(json!({"layers": [blue, red]}));
         fx.on_click(0.0);
         assert_eq!(fx.render(0.1, 0.0, 0.0)[0], (0, 0, 255));
     }
 
     #[test]
-    fn reactive_colori_a_caso_mai_neri() {
+    fn reactive_random_colors_never_black() {
         let mut fx = effect(json!({"layers": [reactive(json!({"randomColor": true, "duration": 500}))]}));
         for k in 0..200 {
             fx.on_click(k as f64);
