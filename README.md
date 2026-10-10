@@ -5,14 +5,16 @@
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
-**Synapse's editor is fine. What's heavy is keeping it running.**
+**DemonNapse is a small Windows program that plays your Razer mouse's lighting effects
+without keeping Synapse running.**
 
-So DemonNapse does not give you a new editor to learn: it leaves the editing to Razer's own
-apps and takes over the playing. Build your profiles in Synapse and your lighting in Chroma
-Studio, as you always did. When you are done, close Synapse: a 526 KB daemon using under 2 MB
-of memory takes its place and plays your Chroma Studio effects **without Synapse running**,
-one per on-board profile, switched with the profile button. Want to change something? Open
-Synapse again, edit, close it: the daemon picks up the new version by itself.
+Synapse's editor is fine; what's heavy is keeping it running. So DemonNapse does not give you
+a new editor to learn: it leaves the editing to Razer's own apps and takes over the playing.
+Build your profiles in Synapse and your lighting in Chroma Studio, as you always did. When you
+are done, close Synapse: DemonNapse (526 KB, under 2 MB of memory) takes its place and plays
+your Chroma Studio effects, one per on-board profile, switched with the profile button. Want
+to change something? Open Synapse again, edit, close it: DemonNapse picks up the new version
+by itself.
 
 Your keys and DPI keep working too, because they live in the mouse's on-board memory. No
 `RazerAppEngine`, no Razer services in the background, no more falling back to spectrum
