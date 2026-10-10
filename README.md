@@ -14,251 +14,103 @@ more falling back to spectrum cycling.
 > Independent project, **not affiliated with or endorsed by Razer Inc.** Razer, Synapse and
 > Chroma are trademarks of Razer Inc., used only to identify compatible hardware and software.
 
-## What nobody else does
+## What it does
 
-DemonNapse is a **companion to Synapse, not another replacement for it**. As far as I could
-find (October 2026), no other project does these three things:
+DemonNapse is a **companion to Synapse, not another replacement for it**.
 
-1. **Your Chroma Studio effects run with Synapse closed.** Every alternative replaces Synapse
-   with its own UI or config file, so you rebuild your lighting from scratch with whatever
-   effects it offers; the tools built on Razer's Chroma SDK (Artemis, Aurora) need Synapse
-   running. Here you keep designing in Chroma Studio, the daemon imports the effects by reading
-   Synapse's own log files and renders every layer type itself, measured frame by frame
-   against Razer's engine. Nothing to redo, nothing new to learn.
-2. **A Chroma Studio effect per on-board profile, with Synapse closed.** The mouse memory
-   stores keys and DPI, never lighting, so any per-profile lighting Razer offers (Linked
-   Games, "switch lighting when profile is switched") only works while Synapse is running.
-   People have been [asking for this for years](https://insider.razer.com/razer-chroma-rgb-21/different-lighting-for-each-profile-50709).
-   The daemon detects the profile button under the mouse and switches effect by itself.
-3. **Automatic hand-over.** Open Synapse and the daemon starts the Razer services, releases
-   the mouse and waits. Close Synapse and it re-imports your changes, stops the services and
-   takes the mouse back. You never touch a terminal or a config file.
-It is also small: a single 526 KB executable using 1.5–2 MB of private memory and ~0.1 % of
-one core, where Synapse and its services sit at 600–800 MB. Most alternatives declare 14–40 MB.
+- **Plays your Chroma Studio effects with Synapse closed.** You keep designing in Chroma
+  Studio; the daemon reads the effects from Synapse's own log files and renders them itself.
+  Nothing to rebuild, nothing new to learn.
+- **One effect per on-board profile.** Press the profile button under the mouse and the
+  lighting changes with the profile. Razer only does this while Synapse is running, and people
+  have been [asking for it for years](https://insider.razer.com/razer-chroma-rgb-21/different-lighting-for-each-profile-50709).
+- **Hands the mouse over by itself.** Open Synapse and the daemon steps aside; close it and
+  the daemon picks up your changes and takes the mouse back. No terminal, no config file.
+- **Lights off from the mouse.** Press the profile button 5 times quickly and the LEDs go
+  dark; do it again and they come back.
 
-## Why
+As far as I could find (October 2026), no other project does the first three: see
+[how it compares](docs/comparison.md).
 
-Synapse 4 cannot bind a Chroma Studio effect to an on-board profile (confirmed by Razer
-support: the mouse memory stores keys and DPI, never lighting), and the app plus its 14
-background services sit at 600–800 MB of RAM. DemonNapse fixes both.
+## How light
 
 | | Synapse 4 + services | DemonNapse |
 |---|---|---|
 | RAM (private working set) | ~650 MB + 168 MB | 1.5–2 MB |
-| CPU (60 s with music playing and the Audio Meter driving the LEDs) | — | ~0.3 % of one core |
-| Chroma Studio effect per on-board profile | no | yes |
-| **With an Ambient layer active** (screen capture) | — | **~55 MB** and ~0.3 % more of one core |
+| CPU | — | ~0.1 % of one core, ~0.3 % with the Audio Meter following music |
+| Executable | — | one 526 KB file |
 
 <sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4). One machine, not a
-benchmark; yours will differ. `tools/bench.py` measures a running daemon on yours.</sub>
+benchmark; yours will differ.</sub>
 
-> **Ambient Awareness is the one heavy layer.** Reading the screen needs the GPU driver, which
-> adds about 55 MB of private memory while an effect with an Ambient layer is on the mouse. The
-> daemon does not even load the capture code otherwise: `d3d11.dll` and `dxgi.dll` are
-> delay-loaded, so with no profile using Ambient they are never mapped, and switching to a
-> profile without it closes the capture again. If you want the daemon at its lightest, leave
-> Ambient out of your effects.
-
-The daemon was first written in Python (kept in `python/` as the reference implementation:
-15 MB of private memory, ~0.7 % of one core) and then ported to Rust. `tools/parity.py`
-checks that both render the same frames, except layers with random colours and the layers
-redone in Rust on Razer's measurements (Wave, Wheel, Tidal, Ripple, Fire, Starlight, Ambient),
-which `cargo test` covers instead; `tools/bench.py` measures a running daemon.
-
-## How it compares
-
-Other people noticed how heavy Synapse is, and their projects are good at things DemonNapse
-does not try to do. Pick the one that matches what you want:
-
-| Project | What it is | Imports your Synapse / Chroma Studio setup | Effect per on-board profile | Devices |
-|---|---|---|---|---|
-| [OpenRGB](https://openrgb.org) | Vendor-neutral RGB control, all brands, all OSes | no | no | hundreds, all brands |
-| [openrazer-win](https://github.com/Ar4ikov/openrazer-win) | Windows port of OpenRazer: daemon, CLI and Python library | no | no | 260+ Razer devices |
-| [opsrzr](https://github.com/atv57/opsrzr) | Tray app: preset RGB, DPI, polling rate, battery | no | no | a few Razer devices |
-| [snakecharmer](https://github.com/asavs/snakecharmer) | Static and hardware effects per zone, plus a toolkit to reverse-engineer new mice | no | no | a few Razer devices |
-| [neuron](https://github.com/worflor/neuron) | Tray app and CLI meant to remove Synapse: own effects, remapping, writes to on-board memory | a Synapse 3 export, not Chroma Studio | no | a few Razer devices |
-| [Artemis](https://github.com/Artemis-RGB/Artemis) / [Aurora](https://github.com/Aurora-RGB/Aurora) | Layered and game-aware RGB for all brands | no, and they drive Razer devices through the Chroma SDK, so Synapse must run | no | many, all brands |
-| [synapsekiller](https://github.com/nxroot/synapsekiller) | Starts Synapse, then kills its services after a delay | keeps what Synapse applied | no (no lighting engine) | any |
-| [open-chroma](https://github.com/nickolasdeluca/open-chroma) | Windows service that replaces Synapse's lighting and the Chroma SDK service, with its own JSON profiles | only the ARGB controller's channel layout, read from Synapse's logs; no effects | no | a few Razer devices |
-| **DemonNapse** | Synapse companion daemon | **yes, from Synapse's logs** | **yes** | one mouse verified |
-
-If you want to get rid of Synapse entirely, or you own many devices, use OpenRGB or
-openrazer-win: their device support is far beyond this project. DemonNapse is for people who
-like Chroma Studio and only want it to stop running all day.
-
-## How it works
-
-1. **Synapse stays your editor.** Profiles, key bindings, DPI stages and Chroma Studio effects
-   are designed in Synapse/Chroma as usual. Synapse writes all of it to its own log files.
-2. **The daemon reads those logs** (`src/extract.rs`): the layers of every Chroma Studio
-   effect, whatever its type, the on-board slot of every profile and the mouse's LED map (which
-   Chroma Studio grid cell is which physical LED).
-3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
-   `DOTA 2` → `Chroma Effect DOTA`. Names are compared word by word (letters and digits only,
-   case ignored, a leading `Chroma Effect` does not count); the effect with the most words in
-   common wins, and on a tie the first one in Synapse's logs. `effect_overrides` in
-   `config.json` forces a match when the names differ. A profile with no matching effect keeps
-   its RGB **off** (the log says so). Effects can have any name: `Chroma Effect …` is only
-   Synapse's default, a renamed effect is read the same way.
-4. **The mouse tells the daemon which profile is active** (vendor HID register `0x05/0x84`,
-   plus the DPI/scroll events the firmware sends on every switch). The daemon renders the
-   matching effect frame by frame over HID (`0x0F/0x03`, per-LED) — no Razer software needed.
-   The "Hybrid Storage" slot (white indicator) is skipped automatically by jumping to the
-   next configured slot (`0x05/0x04`), so a 3-profile setup is 3 clean clicks.
-   **Lights off without software:** press the profile button 5 times within 1.5 s and the
-   LEDs go dark; do it again and they come back. The profile you started from is restored,
-   so the burst does not leave you on another slot, and the lights stay off across a Synapse
-   hand-over until you turn them back on. Count and time window are in `config.json`.
-5. **Lifecycle.** At start the daemon kills leftover Razer processes, stops the Razer
-   services and puts the mouse back in normal device mode (a Synapse that was killed leaves
-   it in driver mode, where the profile button no longer switches slot). When you launch
-   Synapse it notices within ~1.5 s, starts the services, releases the mouse and waits. When you close Synapse it re-reads effects and profiles, stops the
-   services and takes the mouse back. You never touch a terminal.
-
-Supported layers: **Static**, **Spectrum Cycling**, **Wave**, **Wheel**, **Tidal**, **Ripple**,
-**Starlight**, **Breathing**, **Fire**, **Audio Meter** (system output peak via
-`IAudioMeterInformation`, no audio capture) and **Reactive** (mouse button flash), stacked in
-the same order as in Chroma Studio. Like Razer's engine, the Audio Meter paints its whole region
-with one colour of the gradient (position = output peak × boost, auto boost included) and lets
-the layers below show through when the level falls back to zero. Playback options are honoured
-(start on a click, stop after N cycles or on the next click), and so are layer groups. Wheel and
-Tidal use the center point you set in Chroma Studio. **Ambient Awareness** reads the colours of
-the primary screen like Razer's engine (one pixel per grid cell of the region, the chosen screen
-area, the same blur, every 40 ms) through DXGI Desktop Duplication, and only while the active
-effect has an Ambient layer: then the daemon uses about 55 MB more private memory (the GPU
-driver) and ~0.3 % more of one core. With any other effect the capture libraries are not even
-loaded and the cost is zero (see the note under [Why](#why)).
-**Chroma Generate** (AI/pattern generator from images and videos) is not supported and will not
-be: it is the opposite of lightweight.
-
-Razer does not document what "speed 15" or "width 100" mean: timings, shapes and the Audio
-Meter were measured on the Chroma Studio preview, which shows the frames of Razer's own engine
-(constants and notes at the top of `src/layers.rs`, `src/effect.rs` and `src/ambient.rs`).
-
-## Requirements
-
-- Windows 10/11
-- Razer Synapse 4 installed (used only as the editor; it is not running while the daemon works)
-- `demonnapse.exe`: download it from the [latest release](../../releases/latest) together with
-  `install.cmd`, `uninstall.cmd` and `config.json`, or build it with `cargo build --release` ([Rust toolchain](https://rustup.rs),
-  MSVC target, no C compiler needed), or put a prebuilt one next to `install.cmd`
-- A supported mouse (see below)
-
-Python is only needed for the scripts in `tools/` and for the reference daemon in `python/`
-(`pip install -r python/requirements.txt`). Besides `parity.py`, `bench.py` and `sniff.py`:
-`tools/preview.py` shows a Chroma Studio effect on the mouse without assigning it to a profile,
-and `tools/synapse-inspect.mjs` (Node) reads Chroma Studio's options from a running Synapse
-started with `--inspect`, the way the layers were measured.
+One layer is heavy: **Ambient Awareness** reads the screen, which costs about 55 MB more while
+an effect that uses it is on the mouse, and nothing otherwise.
 
 ## Install
 
-1. In Synapse: put your profiles in on-board memory slots, name a Chroma Studio effect with a
-   word in common with each profile, **modify a layer after renaming** (Synapse only logs the
-   new name when something changes), then quit Synapse completely (tray → Exit).
-2. Optional: `demonnapse.exe extract` (the one next to `install.cmd`, or
-   `target\release\demonnapse.exe` if you built it) lists every effect and profile found in
-   Synapse's logs. The daemon reads them by itself on its first start and again every time
-   you close Synapse.
-3. Right-click `install.cmd` → **Run as administrator**. It looks for `demonnapse.exe` next to
-   itself, then in `target\release`. It creates a scheduled task at logon with elevated rights
-   (needed to stop/start Razer services), removes Synapse from Windows autostart, sets the Razer services to manual start and launches the daemon.
+You need Windows 10/11 and Razer Synapse 4 installed (it stays your editor; it is not running
+while the daemon works).
 
-Log: `demonnapse.log` next to `config.json`, one line per event as `YYYY-MM-DD HH:MM:SS message`.
-It is never rotated; it grows by a few lines a day, delete it whenever you like. If the mouse is
-unplugged or a file is missing the daemon logs the error once and retries every 5 seconds.
-Debug run with every HID event logged: stop the task (`schtasks /End /TN DemonNapse`), then run
-`demonnapse.exe -v` from a terminal **opened as administrator** (otherwise it cannot stop the
-Razer services); from a terminal the log goes to the screen instead of the file.
+1. Download the zip from the [latest release](../../releases/latest) and extract it anywhere.
+2. In Synapse: put your profiles in on-board memory slots and give each Chroma Studio effect
+   a word in common with its profile (profile `CS2` → effect `Chroma Effect CS2`). **Change
+   something in a layer after renaming** (Synapse only logs the new name when something
+   changes), then quit Synapse completely (tray → Exit).
+3. Right-click `install.cmd` → **Run as administrator**.
 
-Other commands, used to check the daemon piece by piece (stop the task first for the ones that
-talk to the mouse, `probe`):
+`install.cmd` creates a scheduled task that starts the daemon at logon, removes Synapse from
+Windows autostart and sets the Razer services to manual start. `uninstall.cmd` (as
+administrator) puts all of that back exactly as it was.
 
-| command | what it does |
+To build it yourself: `cargo build --release` ([Rust toolchain](https://rustup.rs), MSVC
+target, no C compiler needed).
+
+## Devices
+
+| | |
 |---|---|
-| `check [PID]` | tries a Razer mouse step by step (see [Supported devices](#supported-devices)) and prints a report |
-| `extract [--out FOLDER]` | effects and profiles from Synapse's logs, written next to `config.json` or in `FOLDER` |
-| `profiles` | profile → matched effect, as JSON |
-| `probe` | firmware, active slot and device mode of the mouse |
-| `audio [seconds]` | output peak, 10 readings a second (default 3 s) |
-| `synapse [--kill NAME.exe]` | is Synapse open, are we admin, state of the Razer services; `--kill` closes one process the way the daemon closes Synapse |
-| `render "<effect>" <t0> <frames> <fps>` | frames of an effect from time `t0` (seconds), one line of hex colours per frame |
+| **Verified** | Razer Basilisk V3 35K, wired (PID `0x00CB`) |
+| **Should work, not tried yet** | Other Razer mice with on-board profiles and per-LED lighting, wired or through their wireless dongle |
+| **Planned** | Razer keyboards and other Chroma devices |
 
-`render` options: `--layer NAME` only that layer (first region), `--all` the effect spread over
-every LED, `--clicks S,S,...` mouse clicks at those seconds (Reactive and playback on click),
-`--live` renders in real time, for Ambient. `demonnapse.exe` has no window of its own, so in a
-terminal the prompt may come back before the output: press Enter once it has printed.
+Only one mouse is verified because it is the one I own, not because the daemon is tied to it:
+it finds the mouse among the connected Razer devices, reads its LED count and LED map from
+Synapse's logs and detects the protocol variant by itself. Nothing in it is specific to a
+cable, but nobody has run it on a wireless mouse yet. Today it drives one mouse; a Razer
+keyboard plugged in next to it is left alone.
 
-To go back exactly to how things were: `uninstall.cmd` as administrator. On the first install
-`install.cmd` saves to `razer_backup.txt` the start type of the Razer services, Synapse's autostart
-entry and whether that entry is disabled in Task Manager; `uninstall.cmd` puts back exactly those.
-Without that file (installed with an older version) the services are set to automatic and Synapse
-gets its standard, enabled autostart entry.
+**Own a different Razer mouse? Two minutes of yours put it on the list.** Close Synapse (and
+stop the daemon if it is installed: `schtasks /End /TN DemonNapse`), then run
+`demonnapse.exe check`: in about 30 seconds it opens the mouse, reads its profiles, asks
+you to press the profile button and lights the LEDs one at a time. Nothing is written to the
+mouse memory. Then paste the output in a
+[device report](../../issues/new?template=device_report.yml), or open a
+[device support request](../../issues/new?template=device_support.yml) if `check` stops with
+an error.
 
-## Configuration (`config.json`)
+## Before you install
 
-The daemon looks for `config.json` next to `demonnapse.exe` or up to two folders above it (so
-`target\release\demonnapse.exe` finds the one in the repository root), otherwise in the current
-folder. The extracted files and the log are written in the same folder.
-
-| key | meaning |
-|---|---|
-| `device.pid` | optional: USB product id of the mouse, e.g. `"0x00CB"`. When missing the daemon uses the connected Razer device that Synapse lists as a mouse (never a keyboard or headset), or the only Razer device connected if Synapse does not know its type; with several candidates it asks you to set it |
-| `device.leds` / `device.chroma_grid` | optional: LED count and Chroma Studio grid position `"row,col"` → physical LED index. Read from Synapse's logs (`synapse_device.json`) when missing; set them only to override |
-| `effect_overrides` | `{"Profile name": "Chroma Effect X"}` when names have nothing in common |
-| `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
-| `fps` | frames per second sent to the mouse (default 60) |
-| `audio_gain` | multiplies the output peak before the Audio Meter (default 1, same as Razer) |
-| `lights_toggle_clicks` | profile button presses that turn the lights off and on again (default 5, `0` disables it) |
-| `lights_toggle_seconds` | time window for those presses, in seconds (default 1.5) |
-
-## Supported devices
-
-Verified on the **Razer Basilisk V3 35K (wired, PID `0x00CB`)** only: control interface,
-per-LED protocol, LED map and profile registers were all reverse-engineered and tested on that
-mouse. Other wired Razer mice speaking the same protocol (most of them, see the OpenRazer wiki)
-will probably work as they are: the daemon finds the mouse among the connected Razer devices,
-reads its LED count and map from Synapse's logs and detects the report's transaction id (`0x1F`,
-`0x3F` or `0xFF`). A Razer keyboard plugged in next to it is left alone.
-
-**Own a different Razer mouse?** Close Synapse, stop the daemon if it runs
-(`schtasks /End /TN DemonNapse`) and run `demonnapse.exe check` (or `check 0x00XX` for a given
-PID). In about 30 seconds it lists the Razer devices, opens the mouse, looks for its LED map and
-profiles in Synapse's logs, reads the on-board slots and switches slot and back, waits 15
-seconds for you to press the profile button, then lights the LEDs red, green, blue and one at a
-time in white. Nothing is written to the mouse memory. Paste the output in a
-[device report](../../issues/new?template=device_report.yml) and say whether every LED lit up
-in turn: that is how a model gets on the list. If `check` stops with an error or does not find
-the mouse, open a [device support request](../../issues/new?template=device_support.yml)
-instead. Wireless mice and
-keyboards are not supported. `tools/sniff.py` (Python, `pip install hidapi`) shows everything
-the mouse sends.
-
-## Things you should know before installing
-
-- The daemon **runs elevated**, **kills `RazerAppEngine.exe`** and **stops the Razer Windows
-  services** while it owns the mouse. Read `src/daemon.rs` and `src/synapse.rs` (they are
-  short) if that worries you.
+- The daemon **runs elevated**, **closes `RazerAppEngine.exe`** and **stops the Razer Windows
+  services** while it owns the mouse. `src/daemon.rs` and `src/synapse.rs` are short, read
+  them if that worries you.
 - It depends on the **format of Synapse 4's log files**, which Razer can change at any time.
-  If an update breaks extraction, the daemon keeps the last known effects.
-- **No kernel driver, no input injection.** It uses only user-mode APIs (`hidapi` feature
-  reports, `GetAsyncKeyState`, WASAPI meter, DXGI Desktop Duplication for Ambient), the same
-  approach as OpenRGB/OpenRazer: it reads whether a mouse button is down and never sends keys
-  or clicks. Not tested against anti-cheat systems.
+  If an update breaks the import, the daemon keeps the last effects it read.
+- **No kernel driver, no input injection.** User-mode APIs only; it reads whether a mouse
+  button is down and never sends keys or clicks. Not tested against anti-cheat systems.
 - The executable is **not code-signed**. SmartScreen may warn on first run (More info → Run
-  anyway); with Smart App Control turned on, Windows 11 blocks unsigned programs outright and
-  offers no way around it. Each release lists the SHA-256 of every file in `SHA256SUMS.txt`
-  (`certutil -hashfile demonnapse.exe SHA256` prints yours), or you can build it
-  yourself from source.
-- Every frame is also sent as a small UDP packet to `127.0.0.1:47311` (local only, it never
-  leaves the PC), for an experimental desktop wallpaper that takes the mouse colours; nothing
-  listens there unless you run it, and `tools/bench.py` uses it to count frames.
-- Every Chroma Studio layer is imported; all of them are rendered except Chroma Generate,
-  which is ignored with a warning.
-- A "click" means a **mouse button** (left, right, middle, side buttons), never the keyboard,
-  even where Chroma Studio says "on any key pressed".
-- **Tidal started by a click** (playback start "on any key pressed") does not match Razer's
-  engine yet: it starts and stops, but the timing of each run differs. A Tidal that always runs
-  is rendered like Razer's.
+  anyway); with Smart App Control turned on, Windows 11 blocks unsigned programs outright.
+  Each release lists the SHA-256 of every file in `SHA256SUMS.txt`, or build it from source.
+- Every frame is also sent as a UDP packet to `127.0.0.1:47311`, for an experimental desktop
+  wallpaper. It never leaves the PC and nothing listens there unless you run it.
+- Known limits: **Chroma Generate** is not rendered; a "click" means a mouse button, never the
+  keyboard; a **Tidal** layer started by a click does not follow Razer's timing yet.
+
+## More
+
+- [How it works](docs/how-it-works.md): how effects are read from the logs and matched to
+  profiles, the supported layers, the hand-over with Synapse.
+- [Reference](docs/reference.md): `config.json`, the other commands, the log, uninstalling.
+- [How it compares](docs/comparison.md) with OpenRGB, openrazer-win and the others.
 
 ## Acknowledgements
 
