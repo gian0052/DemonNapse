@@ -1,12 +1,12 @@
 # DemonNapse
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/rust-single%20520%20KB%20exe-orange)
+![Rust](https://img.shields.io/badge/rust-single%20526%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
 Lightweight replacement for Razer Synapse's RGB engine on Windows. Keep designing your
-profiles and Chroma Studio effects in Synapse, close it, and a 520 KB Rust daemon using
+profiles and Chroma Studio effects in Synapse, close it, and a 526 KB Rust daemon using
 under 2 MB of private memory takes over: one RGB effect per on-board profile, switched with the profile button under the mouse,
 with Synapse and all Razer services shut down.
 
@@ -32,7 +32,7 @@ find (September 2026), no other project does these four things:
 3. **Automatic hand-over.** Open Synapse and the daemon starts the Razer services, releases
    the mouse and waits. Close Synapse and it re-imports your changes, stops the services and
    takes the mouse back. You never touch a terminal or a config file.
-4. **About 2 MB of memory.** A single 520 KB executable using 1.5–2 MB of private memory and
+4. **About 2 MB of memory.** A single 526 KB executable using 1.5–2 MB of private memory and
    ~0.1 % of one core. Synapse and its services sit at 600–800 MB; the lightest alternatives
    declare 14–40 MB.
 
@@ -102,6 +102,10 @@ like Chroma Studio and only want it to stop running all day.
    matching effect frame by frame over HID (`0x0F/0x03`, per-LED) — no Razer software needed.
    The "Hybrid Storage" slot (white indicator) is skipped automatically by jumping to the
    next configured slot (`0x05/0x04`), so a 3-profile setup is 3 clean clicks.
+   **Lights off without software:** press the profile button 5 times within 1.5 s and the
+   LEDs go dark; do it again and they come back. The profile you started from is restored,
+   so the burst does not leave you on another slot, and the lights stay off across a Synapse
+   hand-over until you turn them back on. Count and time window are in `config.json`.
 5. **Lifecycle.** At start the daemon kills leftover Razer processes, stops the Razer
    services and puts the mouse back in normal device mode (a Synapse that was killed leaves
    it in driver mode, where the profile button no longer switches slot). When you launch
@@ -132,7 +136,8 @@ Meter were measured on the Chroma Studio preview, which shows the frames of Raze
 
 - Windows 10/11
 - Razer Synapse 4 installed (used only as the editor; it is not running while the daemon works)
-- `demonnapse.exe`: build it with `cargo build --release` ([Rust toolchain](https://rustup.rs),
+- `demonnapse.exe`: download it from the [latest release](../../releases/latest) together with
+  `install.cmd`, `uninstall.cmd` and `config.json`, or build it with `cargo build --release` ([Rust toolchain](https://rustup.rs),
   MSVC target, no C compiler needed), or put a prebuilt one next to `install.cmd`
 - A supported mouse (see below)
 
@@ -200,6 +205,8 @@ folder. The extracted files and the log are written in the same folder.
 | `skip_slots` | on-board slots to skip (default `[1]`, the Hybrid Storage slot) |
 | `fps` | frames per second sent to the mouse (default 60) |
 | `audio_gain` | multiplies the output peak before the Audio Meter (default 1, same as Razer) |
+| `lights_toggle_clicks` | profile button presses that turn the lights off and on again (default 5, `0` disables it) |
+| `lights_toggle_seconds` | time window for those presses, in seconds (default 1.5) |
 
 ## Supported devices
 

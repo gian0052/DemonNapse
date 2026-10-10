@@ -8,5 +8,8 @@
     1
   ],
   "fps": 60,
-  "audio_gain": 1.0
+  "audio_gain": 1.0,
+  "_lights_note": "Press the profile button under the mouse lights_toggle_clicks times within lights_toggle_seconds to turn the lights off, and again to turn them back on; the profile you started from is restored. 0 disables it.",
+  "lights_toggle_clicks": 5,
+  "lights_toggle_seconds": 1.5
 }

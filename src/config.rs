@@ -1,6 +1,6 @@
 //! config.json: mouse da usare, griglia di Chroma Studio, abbinamenti forzati profilo -> effetto
-//! (`effect_overrides`), slot da saltare (`skip_slots`), frame al secondo (`fps`) e guadagno
-//! dell'Audio Meter.
+//! (`effect_overrides`), slot da saltare (`skip_slots`), frame al secondo (`fps`), guadagno
+//! dell'Audio Meter e gesto per spegnere le luci (`lights_toggle_clicks`, `lights_toggle_seconds`).
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -29,6 +29,11 @@ pub struct Config {
     pub fps: f64,
     #[serde(default = "default_gain")]
     pub audio_gain: f64,
+    /// Tanti clic sul pulsante dei profili entro `lights_toggle_seconds` spengono/riaccendono i LED (0 = mai).
+    #[serde(default = "default_toggle_clicks")]
+    pub lights_toggle_clicks: usize,
+    #[serde(default = "default_toggle_seconds")]
+    pub lights_toggle_seconds: f64,
     /// Il mouse trovato da solo quando `device.pid` manca: (PID, come e' stato scelto) o perche' no.
     #[serde(skip)]
     pub detected: Option<Result<(u16, String), String>>,
@@ -58,6 +63,12 @@ fn default_fps() -> f64 {
 }
 fn default_gain() -> f64 {
     1.0
+}
+fn default_toggle_clicks() -> usize {
+    5
+}
+fn default_toggle_seconds() -> f64 {
+    1.5
 }
 
 impl Config {

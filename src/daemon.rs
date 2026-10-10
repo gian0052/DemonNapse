@@ -4,7 +4,7 @@
 
 use crate::audio::PeakMeter;
 use crate::config::Config;
-use crate::layers::{Canvas, Rgb};
+use crate::layers::{Canvas, Rgb, BLACK};
 use crate::profiles::Active;
 use crate::{extract, profiles, razerhid, synapse};
 use hidapi::{HidApi, HidDevice};
@@ -21,17 +21,53 @@ const VK_BUTTONS: [i32; 5] = [0x01, 0x02, 0x04, 0x05, 0x06]; // sx, dx, centrale
 const WALL_ADDR: &str = "127.0.0.1:47311"; // lo sfondo (wallpaper.py) ascolta qui
 const CONTROL_RETRIES: u32 = 5;
 
+/// Il gesto "luci on/off": `clicks` cambi di slot entro `window` secondi. Il pulsante dei profili
+/// lo gestisce il firmware e al PC arriva solo il cambio di slot, quindi si contano quelli.
+struct Burst {
+    clicks: usize,
+    window: f64,
+    times: Vec<f64>,
+    home: u8, // lo slot da cui e' partita la raffica, da rimettere
+}
+
+impl Burst {
+    fn new(clicks: usize, window: f64) -> Burst {
+        Burst { clicks, window, times: Vec::new(), home: 0 }
+    }
+
+    /// Un cambio di slot partito da `from`: true se completa il gesto.
+    fn change(&mut self, from: u8, now: f64) -> bool {
+        if self.clicks == 0 {
+            return false;
+        }
+        self.times.retain(|&t| now - t <= self.window);
+        if self.times.is_empty() {
+            self.home = from;
+        }
+        self.times.push(now);
+        if self.times.len() < self.clicks {
+            return false;
+        }
+        self.times.clear();
+        true
+    }
+}
+
 /// Legge lo slot attivo dal mouse; gli slot non configurati (es. la Hybrid Storage) vengono
 /// saltati passando al successivo configurato.
 struct ProfileTracker {
     slots: Vec<u8>,
     idx: usize,
     last_poll: f64,
+    raw: u8, // ultimo slot letto o impostato sul mouse
+    burst: Burst,
+    hold_until: f64, // dopo il gesto i clic in piu' della raffica vengono annullati
+    toggled: bool,   // il gesto e' stato fatto: lo raccoglie il ciclo principale
 }
 
 impl ProfileTracker {
-    fn new(ctl: &HidDevice, slots: Vec<u8>, now: f64) -> ProfileTracker {
-        let mut t = ProfileTracker { slots, idx: 0, last_poll: 0.0 };
+    fn new(ctl: &HidDevice, slots: Vec<u8>, burst: Burst, now: f64) -> ProfileTracker {
+        let mut t = ProfileTracker { slots, idx: 0, last_poll: 0.0, raw: 0, burst, hold_until: 0.0, toggled: false };
         t.refresh(ctl, now);
         t
     }
@@ -40,12 +76,24 @@ impl ProfileTracker {
     fn refresh(&mut self, ctl: &HidDevice, now: f64) -> bool {
         self.last_poll = now;
         let Some(mut slot) = razerhid::get_active_profile(ctl) else { return false };
+        if self.raw != 0 && slot != self.raw {
+            if now < self.hold_until {
+                razerhid::set_active_profile(ctl, self.burst.home);
+                slot = self.burst.home;
+            } else if self.burst.change(self.raw, now) {
+                razerhid::set_active_profile(ctl, self.burst.home);
+                slot = self.burst.home;
+                self.hold_until = now + self.burst.window;
+                self.toggled = true;
+            }
+        }
         if !self.slots.contains(&slot) {
             let next = self.slots.iter().copied().find(|&s| s > slot).unwrap_or(self.slots[0]);
             info!("slot {slot} not configured -> jumping to slot {next}");
             razerhid::set_active_profile(ctl, next);
             slot = next;
         }
+        self.raw = slot;
         let new = self.slots.iter().position(|&s| s == slot).unwrap_or(0);
         let changed = new != self.idx;
         self.idx = new;
@@ -87,7 +135,8 @@ fn wait_for_synapse_to_close(dir: &Path) {
 }
 
 /// Una "sessione" tra un'apertura di Synapse e l'altra. Ritorna Ok quando Synapse compare.
-fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpSocket>, last_error: &mut String) -> Result<(), String> {
+/// `dark`: luci spente col gesto del pulsante profili; resta tale anche dopo una pausa per Synapse.
+fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpSocket>, last_error: &mut String, dark: &mut bool) -> Result<(), String> {
     // prima installazione: i file estratti non ci sono ancora, li leggo subito dai log di Synapse
     if ["chroma_effects_dump.json", "synapse_profiles.json", "synapse_device.json"].iter().any(|f| !dir.join(f).exists()) {
         extract_all(dir)?;
@@ -113,8 +162,9 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
     }
     let events = razerhid::open_events(&api, pid);
     let now = || clock.elapsed().as_secs_f64();
-    let mut tracker = ProfileTracker::new(&ctl, active.iter().map(|a| a.slot).collect(), now());
-    info!("active: slot {} -> profile '{}'", active[tracker.idx].slot, active[tracker.idx].name);
+    let burst = Burst::new(cfg.lights_toggle_clicks, cfg.lights_toggle_seconds);
+    let mut tracker = ProfileTracker::new(&ctl, active.iter().map(|a| a.slot).collect(), burst, now());
+    info!("active: slot {} -> profile '{}'{}", active[tracker.idx].slot, active[tracker.idx].name, if *dark { ", lights off" } else { "" });
     last_error.clear();
 
     let mut pressed = [false; VK_BUTTONS.len()];
@@ -161,6 +211,12 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
             last_frame = None;
             info!("profile -> '{}' ({})", current.name, current.effect.title);
         }
+        if std::mem::take(&mut tracker.toggled) {
+            *dark = !*dark;
+            current.effect.clear_flashes();
+            last_frame = None;
+            info!("lights {} (profile button pressed {} times)", if *dark { "off" } else { "on" }, cfg.lights_toggle_clicks);
+        }
         let fx = &mut current.effect;
 
         if fx.needs_clicks() {
@@ -173,8 +229,12 @@ fn session(dir: &Path, clock: Instant, meter: &mut PeakMeter, wall: Option<&UdpS
             }
         }
 
-        let peak = if fx.has_audio() { meter.peak() } else { 0.0 };
-        let frame = fx.render(t, dt, peak);
+        let frame = if *dark {
+            vec![BLACK; cfg.device.leds]
+        } else {
+            let peak = if fx.has_audio() { meter.peak() } else { 0.0 };
+            fx.render(t, dt, peak)
+        };
         // reinvio solo se cambia; keepalive ogni secondo (il firmware puo' ridisegnare il suo effetto)
         if last_frame.as_ref() != Some(&frame) || t - last_sent > 1.0 {
             razerhid::custom_frame(&ctl, &frame).map_err(|e| format!("sending to the mouse failed: {e}"))?;
@@ -206,8 +266,9 @@ pub fn run(dir: &Path) {
     let wall = UdpSocket::bind("127.0.0.1:0").ok();
     let clock = Instant::now();
     let mut last_error = String::new();
+    let mut dark = false;
     loop {
-        match session(dir, clock, &mut meter, wall.as_ref(), &mut last_error) {
+        match session(dir, clock, &mut meter, wall.as_ref(), &mut last_error, &mut dark) {
             Ok(()) => wait_for_synapse_to_close(dir),
             Err(e) => {
                 // mouse scollegato, file mancanti...: riprovo finche' non torna, senza riempire il log
@@ -221,5 +282,25 @@ pub fn run(dir: &Path) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn five_quick_clicks_toggle_the_lights() {
+        let mut b = Burst::new(5, 1.5);
+        let from = [2, 3, 4, 2, 3];
+        let got: Vec<bool> = from.iter().enumerate().map(|(i, &s)| b.change(s, 10.0 + i as f64 * 0.3)).collect();
+        assert_eq!(got, [false, false, false, false, true]);
+        assert_eq!(b.home, 2, "si torna allo slot da cui e' partita la raffica");
+
+        let mut slow = Burst::new(5, 1.5);
+        assert!(!(0..10).any(|i| slow.change(2, i as f64 * 0.5)), "un clic ogni mezzo secondo non basta");
+
+        let mut off = Burst::new(0, 1.5);
+        assert!(!(0..10).any(|i| off.change(2, i as f64 * 0.01)), "0 = gesto disattivato");
     }
 }
