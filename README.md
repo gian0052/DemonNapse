@@ -5,13 +5,14 @@
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
-Lightweight replacement for Razer Synapse's RGB engine on Windows. Keep designing your
-profiles and Chroma Studio effects in Synapse, close it, and a 526 KB Rust daemon using
-under 2 MB of private memory takes over: one RGB effect per on-board profile, switched with the profile button under the mouse,
-with Synapse and all Razer services shut down.
+Your Chroma Studio effects, **without Synapse running**, on Windows. Keep designing your
+profiles and effects in Synapse, close it, and a 526 KB Rust daemon using under 2 MB of
+private memory plays them on the mouse: one effect per on-board profile, switched with the
+profile button under the mouse, with `RazerAppEngine` and every Razer service shut down. No
+more falling back to spectrum cycling.
 
 > Independent project, **not affiliated with or endorsed by Razer Inc.** Razer, Synapse and
-> Chroma are trademarks of Razer Inc.
+> Chroma are trademarks of Razer Inc., used only to identify compatible hardware and software.
 
 ## What nobody else does
 
@@ -74,11 +75,11 @@ does not try to do. Pick the one that matches what you want:
 | [OpenRGB](https://openrgb.org) | Vendor-neutral RGB control, all brands, all OSes | no | no | hundreds, all brands |
 | [openrazer-win](https://github.com/Ar4ikov/openrazer-win) | Windows port of OpenRazer: daemon, CLI and Python library | no | no | 260+ Razer devices |
 | [opsrzr](https://github.com/atv57/opsrzr) | Tray app: preset RGB, DPI, polling rate, battery | no | no | a few Razer devices |
-| [razer-win-cli](https://github.com/FriskIsGit/razer-win-cli) | One-shot CLI, no daemon | no | no | a few Razer devices |
 | [snakecharmer](https://github.com/asavs/snakecharmer) | Static and hardware effects per zone, plus a toolkit to reverse-engineer new mice | no | no | a few Razer devices |
 | [neuron](https://github.com/worflor/neuron) | Tray app and CLI meant to remove Synapse: own effects, remapping, writes to on-board memory | a Synapse 3 export, not Chroma Studio | no | a few Razer devices |
 | [Artemis](https://github.com/Artemis-RGB/Artemis) / [Aurora](https://github.com/Aurora-RGB/Aurora) | Layered and game-aware RGB for all brands | no, and they drive Razer devices through the Chroma SDK, so Synapse must run | no | many, all brands |
 | [synapsekiller](https://github.com/nxroot/synapsekiller) | Starts Synapse, then kills its services after a delay | keeps what Synapse applied | no (no lighting engine) | any |
+| [open-chroma](https://github.com/nickolasdeluca/open-chroma) | Windows service that replaces Synapse's lighting and the Chroma SDK service, with its own JSON profiles | only the ARGB controller's channel layout, read from Synapse's logs; no effects | no | a few Razer devices |
 | **DemonNapse** | Synapse companion daemon | **yes, from Synapse's logs** | **yes** | one mouse verified |
 
 If you want to get rid of Synapse entirely, or you own many devices, use OpenRGB or
