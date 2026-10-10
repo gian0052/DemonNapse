@@ -124,7 +124,7 @@ impl Effect {
     /// Also returns the names of the unsupported layers, to be reported in the log.
     pub fn new(spec: &Value, cfg: &Config, grid: &HashMap<(i64, i64), usize>, canvas: &Canvas, seed: u64) -> (Effect, Vec<String>) {
         let mut fx = Effect {
-            title: spec.get("title").and_then(Value::as_str).unwrap_or("(senza nome)").to_string(),
+            title: spec.get("title").and_then(Value::as_str).unwrap_or("(unnamed)").to_string(),
             num_leds: cfg.device.leds,
             stack: Vec::new(),
             gain: cfg.audio_gain,
@@ -187,7 +187,7 @@ impl Effect {
 
     /// An effect that is off, for profiles with no matching effect.
     pub fn off(cfg: &Config, canvas: &Canvas) -> Effect {
-        Effect::new(&serde_json::json!({"title": "(spento)", "layers": []}), cfg, &HashMap::new(), canvas, 1).0
+        Effect::new(&serde_json::json!({"title": "(off)", "layers": []}), cfg, &HashMap::new(), canvas, 1).0
     }
 
     pub fn has_audio(&self) -> bool {
