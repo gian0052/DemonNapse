@@ -5,18 +5,23 @@
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
-Your Chroma Studio effects, **without Synapse running**, on Windows. Keep designing your
-profiles and effects in Synapse, close it, and a 526 KB Rust daemon using under 2 MB of
-private memory plays them on the mouse: one effect per on-board profile, switched with the
-profile button under the mouse, with `RazerAppEngine` and every Razer service shut down. No
-more falling back to spectrum cycling.
+**Synapse's editor is fine. What's heavy is keeping it running.**
+
+So DemonNapse does not give you a new editor to learn: it leaves the editing to Razer's own
+apps and takes over the playing. Build your profiles in Synapse and your lighting in Chroma
+Studio, as you always did. When you are done, close Synapse: a 526 KB daemon using under 2 MB
+of memory takes its place and plays your Chroma Studio effects **without Synapse running**,
+one per on-board profile, switched with the profile button. Want to change something? Open
+Synapse again, edit, close it: the daemon picks up the new version by itself.
+
+Your keys and DPI keep working too, because they live in the mouse's on-board memory. No
+`RazerAppEngine`, no Razer services in the background, no more falling back to spectrum
+cycling.
 
 > Independent project, **not affiliated with or endorsed by Razer Inc.** Razer, Synapse and
 > Chroma are trademarks of Razer Inc., used only to identify compatible hardware and software.
 
 ## What it does
-
-DemonNapse is a **companion to Synapse, not another replacement for it**.
 
 - **Plays your Chroma Studio effects with Synapse closed.** You keep designing in Chroma
   Studio; the daemon reads the effects from Synapse's own log files and renders them itself.
