@@ -36,8 +36,21 @@ cycling.
 - **Lights off from the mouse.** Press the profile button 5 times quickly and the LEDs go
   dark; do it again and they come back.
 
-As far as I could find (October 2026), no other project does the first three: see
-[how it compares](docs/comparison.md).
+## How it compares
+
+As far as I could find (October 2026), no other project does the first three:
+
+| Project | What it is | Imports your Chroma Studio effects | Effect per on-board profile |
+|---|---|---|---|
+| [OpenRGB](https://openrgb.org) | Vendor-neutral RGB control, all brands | no | no |
+| [openrazer-win](https://github.com/Ar4ikov/openrazer-win) | Windows port of OpenRazer, 260+ Razer devices | no | no |
+| [neuron](https://github.com/worflor/neuron) | Tray app meant to remove Synapse, with its own effects | a Synapse 3 export, not Chroma Studio | no |
+| [Artemis](https://github.com/Artemis-RGB/Artemis) / [Aurora](https://github.com/Aurora-RGB/Aurora) | Layered RGB for all brands | no, and Synapse must be running | no |
+| **DemonNapse** | Synapse companion | **yes, from Synapse's logs** | **yes** |
+
+If you want to get rid of Synapse entirely, or you own many devices, use OpenRGB or
+openrazer-win: their device support is far beyond this project. DemonNapse is for people who
+like Chroma Studio and only want it to stop running all day. [More projects compared](docs/comparison.md).
 
 ## How light
 
@@ -117,7 +130,7 @@ an error.
 - [How it works](docs/how-it-works.md): how effects are read from the logs and matched to
   profiles, the supported layers, the hand-over with Synapse.
 - [Reference](docs/reference.md): `config.json`, the other commands, the log, uninstalling.
-- [How it compares](docs/comparison.md) with OpenRGB, openrazer-win and the others.
+- [How it compares](docs/comparison.md): the full table of the projects I looked at.
 
 ## Acknowledgements
 
