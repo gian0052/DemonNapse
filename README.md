@@ -1,6 +1,6 @@
 # DemonNapse
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-green)
 ![Rust](https://img.shields.io/badge/rust-single%20526%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
@@ -16,7 +16,7 @@ with Synapse and all Razer services shut down.
 ## What nobody else does
 
 DemonNapse is a **companion to Synapse, not another replacement for it**. As far as I could
-find (September 2026), no other project does these four things:
+find (October 2026), no other project does these three things:
 
 1. **Your Chroma Studio effects run with Synapse closed.** Every alternative replaces Synapse
    with its own UI or config file, so you rebuild your lighting from scratch with whatever
@@ -32,9 +32,8 @@ find (September 2026), no other project does these four things:
 3. **Automatic hand-over.** Open Synapse and the daemon starts the Razer services, releases
    the mouse and waits. Close Synapse and it re-imports your changes, stops the services and
    takes the mouse back. You never touch a terminal or a config file.
-4. **About 2 MB of memory.** A single 526 KB executable using 1.5–2 MB of private memory and
-   ~0.1 % of one core. Synapse and its services sit at 600–800 MB; the lightest alternatives
-   declare 14–40 MB.
+It is also small: a single 526 KB executable using 1.5–2 MB of private memory and ~0.1 % of
+one core, where Synapse and its services sit at 600–800 MB. Most alternatives declare 14–40 MB.
 
 ## Why
 
@@ -48,6 +47,9 @@ background services sit at 600–800 MB of RAM. DemonNapse fixes both.
 | CPU (60 s with music playing and the Audio Meter driving the LEDs) | — | ~0.3 % of one core |
 | Chroma Studio effect per on-board profile | no | yes |
 | **With an Ambient layer active** (screen capture) | — | **~55 MB** and ~0.3 % more of one core |
+
+<sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4). One machine, not a
+benchmark; yours will differ. `tools/bench.py` measures a running daemon on yours.</sub>
 
 > **Ambient Awareness is the one heavy layer.** Reading the screen needs the GPU driver, which
 > adds about 55 MB of private memory while an effect with an Ambient layer is on the mouse. The
@@ -222,8 +224,11 @@ reads its LED count and map from Synapse's logs and detects the report's transac
 PID). In about 30 seconds it lists the Razer devices, opens the mouse, looks for its LED map and
 profiles in Synapse's logs, reads the on-board slots and switches slot and back, waits 15
 seconds for you to press the profile button, then lights the LEDs red, green, blue and one at a
-time in white. Nothing is written to the mouse memory. Paste the output in an issue and say
-whether every LED lit up in turn: that is how a model gets on the list. Wireless mice and
+time in white. Nothing is written to the mouse memory. Paste the output in a
+[device report](../../issues/new?template=device_report.yml) and say whether every LED lit up
+in turn: that is how a model gets on the list. If `check` stops with an error or does not find
+the mouse, open a [device support request](../../issues/new?template=device_support.yml)
+instead. Wireless mice and
 keyboards are not supported. `tools/sniff.py` (Python, `pip install hidapi`) shows everything
 the mouse sends.
 
@@ -234,9 +239,15 @@ the mouse sends.
   short) if that worries you.
 - It depends on the **format of Synapse 4's log files**, which Razer can change at any time.
   If an update breaks extraction, the daemon keeps the last known effects.
-- It uses only user-mode APIs (`hidapi` feature reports, `GetAsyncKeyState`, WASAPI meter,
-  DXGI Desktop Duplication for Ambient),
-  the same approach as OpenRGB/OpenRazer. Not tested against anti-cheat systems.
+- **No kernel driver, no input injection.** It uses only user-mode APIs (`hidapi` feature
+  reports, `GetAsyncKeyState`, WASAPI meter, DXGI Desktop Duplication for Ambient), the same
+  approach as OpenRGB/OpenRazer: it reads whether a mouse button is down and never sends keys
+  or clicks. Not tested against anti-cheat systems.
+- The executable is **not code-signed**. SmartScreen may warn on first run (More info → Run
+  anyway); with Smart App Control turned on, Windows 11 blocks unsigned programs outright and
+  offers no way around it. Each release lists the SHA-256 of every file in `SHA256SUMS.txt`
+  (`certutil -hashfile demonnapse.exe SHA256` prints yours), or you can build it
+  yourself from source.
 - Every frame is also sent as a small UDP packet to `127.0.0.1:47311` (local only, it never
   leaves the PC), for an experimental desktop wallpaper that takes the mouse colours; nothing
   listens there unless you run it, and `tools/bench.py` uses it to count frames.
@@ -256,4 +267,9 @@ registers (`0x05/0x80..0x84`, `0x05/0x04`) were found by probing.
 
 ## License
 
-MIT.
+Copyright (C) 2026 DemonNapse contributors.
+
+DemonNapse is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. It is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY; see [LICENSE](LICENSE) for the full text.

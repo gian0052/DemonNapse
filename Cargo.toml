@@ -2,7 +2,7 @@
 name = "demonnapse"
 version = "1.1.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Lightweight companion daemon for Razer Synapse: one Chroma Studio effect per on-board profile"
 
 [dependencies]

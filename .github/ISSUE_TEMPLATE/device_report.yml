@@ -1,0 +1,60 @@
+name: Device report
+description: You ran the check command on a Razer mouse and it got to the end. Tell us what happened.
+title: "[Device report] "
+labels: ["device report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. Close Synapse, stop the daemon if it runs (`schtasks /End /TN DemonNapse`),
+        then run `demonnapse.exe check` from a terminal.
+        The report shows the mouse's PID and firmware version and the names of your on-board profiles,
+        no serial numbers; read it before pasting.
+  - type: input
+    id: model
+    attributes:
+      label: Mouse model
+      description: The full name, and whether it is plugged in by cable.
+      placeholder: Razer Basilisk V3 (wired)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DemonNapse version
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of "demonnapse.exe check"
+      description: Paste all of it.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: leds
+    attributes:
+      label: Did every LED light up in turn (red, green, blue, then one at a time in white)?
+      options:
+        - "Yes, all of them"
+        - "Some did not light up, or lit in the wrong order"
+        - "None lit up"
+    validations:
+      required: true
+  - type: dropdown
+    id: button
+    attributes:
+      label: Did "check" see the profile button when you pressed it?
+      options:
+        - "Yes"
+        - "No"
+        - "This mouse has no profile button"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Which LEDs were wrong, what the daemon does with your effects, anything odd.
