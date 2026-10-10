@@ -58,10 +58,10 @@ folder. The extracted files and the log are written in the same folder.
 
 ## Tools
 
-Python is only needed for the scripts in `tools/` and for the reference daemon in `python/`
-(`pip install -r python/requirements.txt`). Besides `parity.py`, `bench.py` and `sniff.py`:
-`tools/preview.py` shows a Chroma Studio effect on the mouse without assigning it to a profile,
-and `tools/synapse-inspect.mjs` (Node) reads Chroma Studio's options from a running Synapse
-started with `--inspect`, the way the layers were measured.
+The daemon needs none of these; they are for measuring and for supporting new devices.
 
-`tools/sniff.py` (Python, `pip install hidapi`) shows everything the mouse sends.
+| tool | what it does | needs |
+|---|---|---|
+| `tools/bench.py [seconds]` | CPU, memory and frames per second of a running daemon | Python, `pip install psutil` |
+| `tools/sniff.py` | shows everything the mouse sends (close Synapse and stop the daemon first) | Python, `pip install hidapi` |
+| `tools/synapse-inspect.mjs` | reads Chroma Studio's options from a running Synapse started with `--inspect`, the way the layers were measured | Node |

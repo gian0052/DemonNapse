@@ -33,7 +33,7 @@ fn read_logs(prefix: &str) -> String {
     files.iter().filter_map(|(_, p)| std::fs::read(p).ok()).map(|b| String::from_utf8_lossy(&b).into_owned()).collect()
 }
 
-/// Il primo valore JSON all'inizio di `txt`, ignorando quello che segue (il `raw_decode` di Python).
+/// Il primo valore JSON all'inizio di `txt`, ignorando quello che segue.
 fn decode_prefix(txt: &str) -> Option<Value> {
     serde_json::Deserializer::from_str(txt).into_iter::<Value>().next()?.ok()
 }
@@ -119,7 +119,7 @@ pub fn profiles(dir: &Path, pid: u16) -> Result<Vec<Profile>, String> {
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct DeviceMap {
     #[serde(default)]
-    pub pid: u16, // per il demone Python, che non cerca il mouse da solo
+    pub pid: u16, // il mouse a cui appartiene la mappa
     pub leds: usize,
     pub chroma_grid: BTreeMap<String, usize>,
 }
@@ -193,7 +193,7 @@ pub fn categories() -> HashMap<u16, String> {
     all
 }
 
-/// Riassunto di un effetto, una riga per regione (come `extract_effects.py`).
+/// Riassunto di un effetto, una riga per regione.
 pub fn summary(title: &str, effect: &Value) -> String {
     let mut out = format!("\n== {title}");
     for layer in effect["layers"].as_array().into_iter().flatten() {

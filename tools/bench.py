@@ -1,8 +1,8 @@
-"""Misura un demone in esecuzione (Python o Rust): CPU, RAM e frame mandati allo sfondo via UDP.
+"""Misura il demone in esecuzione: CPU, RAM e frame mandati allo sfondo via UDP.
 
 Uso:  python tools/bench.py [secondi]      (lo sfondo dinamico dev'essere spento: la porta serve qui)
 
-Trova da solo il processo: pythonw/python con demonnapse.py, oppure demonnapse.exe.
+Trova da solo il processo demonnapse.exe.
 """
 import collections
 import socket
@@ -23,8 +23,6 @@ def find():
         except psutil.Error:
             cmd = ""
         if name == "demonnapse.exe" and len(p.info["cmdline"] or []) <= 2 and "bench" not in cmd:
-            return p
-        if name.startswith("python") and "demonnapse.py" in cmd:
             return p
     return None
 

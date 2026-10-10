@@ -3,7 +3,7 @@
 //!   demonnapse [-v]        il demone (senza finestra; log su demonnapse.log se non c'e' un terminale)
 //!   demonnapse check [PID]  prova un mouse Razer passo passo e stampa un rapporto da incollare in una issue
 //!
-//! Strumenti per verificare il port da Python pezzo per pezzo:
+//! Strumenti per verificare il demone pezzo per pezzo:
 //!   demonnapse render "<effetto>" <t0> <frame> <fps> [--layer NOME] [--all] [--clicks S,S] [--live]   frame in esadecimale
 //!   demonnapse probe                                                          firmware e slot attivo
 //!   demonnapse profiles                                                       profilo -> effetto abbinato (JSON)

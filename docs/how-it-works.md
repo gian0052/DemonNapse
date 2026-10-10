@@ -58,10 +58,8 @@ delay-loaded, so with no profile using Ambient they are never mapped, and switch
 profile without it closes the capture again. If you want the daemon at its lightest, leave
 Ambient out of your effects.
 
-## Python reference and parity
+## Where it comes from
 
-The daemon was first written in Python (kept in `python/` as the reference implementation:
-15 MB of private memory, ~0.7 % of one core) and then ported to Rust. `tools/parity.py`
-checks that both render the same frames, except layers with random colours and the layers
-redone in Rust on Razer's measurements (Wave, Wheel, Tidal, Ripple, Fire, Starlight, Ambient),
-which `cargo test` covers instead; `tools/bench.py` measures a running daemon.
+The daemon was first written in Python (15 MB of private memory, ~0.7 % of one core) and then
+ported to Rust; the Python version is in the git history up to release 1.1.0. `cargo test`
+checks the layers against the measurements taken on Razer's engine.
