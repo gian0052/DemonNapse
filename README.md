@@ -122,12 +122,13 @@ an error.
 ## Acknowledgements
 
 The HID packet format comes from the
-[OpenRazer](https://github.com/openrazer/openrazer) reverse-engineering wiki. The profile
-registers (`0x05/0x80..0x84`, `0x05/0x04`) were found by probing.
+[OpenRazer](https://github.com/openrazer/openrazer) reverse-engineering wiki. The commands
+for on-board profiles (`0x05/0x80..0x84`, `0x05/0x04`) were not documented: I found them by
+trying commands on the mouse one at a time.
 
 ## License
 
-Copyright (C) 2026 DemonNapse contributors.
+**GPL-3.0-or-later.** Copyright (C) 2026 DemonNapse contributors.
 
 DemonNapse is free software: you can redistribute it and/or modify it under the terms of the
 GNU General Public License as published by the Free Software Foundation, either version 3 of
