@@ -7,8 +7,9 @@ Back to the [README](../README.md).
 2. **The daemon reads those logs** (`src/extract.rs`): the layers of every Chroma Studio
    effect, whatever its type, the on-board slot of every profile and the mouse's LED map (which
    Chroma Studio grid cell is which physical LED).
-3. **Profiles are matched to effects by name**: profile `CS2` → effect `Chroma Effect CS2`,
-   `DOTA 2` → `Chroma Effect DOTA`. Names are compared word by word (letters and digits only,
+3. **Profiles are matched to effects by name**. For example, a profile called `Gaming` gets
+   the effect `Chroma Effect Gaming`, and a profile called `Work PC` gets `Chroma Effect
+   Work`: one word in common is enough. Names are compared word by word (letters and digits only,
    case ignored, a leading `Chroma Effect` does not count); the effect with the most words in
    common wins, and on a tie the first one in Synapse's logs. `effect_overrides` in
    `config.json` forces a match when the names differ. A profile with no matching effect keeps

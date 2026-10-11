@@ -73,7 +73,8 @@ while the daemon works).
 
 1. Download the zip from the [latest release](../../releases/latest) and extract it anywhere.
 2. In Synapse: put your profiles in on-board memory slots and give each Chroma Studio effect
-   a word in common with its profile (profile `CS2` → effect `Chroma Effect CS2`). **Change
+   a word in common with its profile (for example: if you have a profile called `Gaming`,
+   name the effect `Chroma Effect Gaming`). **Change
    something in a layer after renaming** (Synapse only logs the new name when something
    changes), then quit Synapse completely (tray → Exit).
 3. Right-click `install.cmd` → **Run as administrator**.
