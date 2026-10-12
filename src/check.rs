@@ -23,19 +23,36 @@ use windows::Win32::System::Threading::CreateMutexW;
 const BUTTON_SECONDS: u64 = 15;
 const BLACK: Rgb = (0, 0, 0);
 
-/// Everything printed, also kept to be saved as the report.
-struct Report(String);
+/// Everything printed, also kept as the report. Once the file has a name it is rewritten after every
+/// line, so closing the window halfway (the X kills the program) loses nothing.
+struct Report {
+    text: String,
+    path: Option<PathBuf>,
+}
 
 impl Report {
     fn line(&mut self, s: String) {
         println!("{s}");
-        self.0 += &s;
-        self.0.push('\n');
+        self.note(s);
+    }
+
+    /// A line of the report that is not printed again (the user typed it).
+    fn note(&mut self, s: String) {
+        self.text += &s;
+        self.text.push('\n');
+        if let Some(p) = &self.path {
+            let _ = std::fs::write(p, &self.text);
+        }
     }
 }
 
 macro_rules! say {
     ($r:expr, $($t:tt)*) => { $r.line(format!($($t)*)) };
+}
+
+/// An instruction for the person at the keyboard: marked so it stands out from the report lines.
+fn tell(s: &str) {
+    println!(">> {s}");
 }
 
 fn yes(ok: bool) -> &'static str {
@@ -178,14 +195,21 @@ fn pick(args: &[String], cfg: Option<&Config>, seen: &[(u16, String)]) -> Result
     }
 }
 
-/// Where the report goes: next to the executable (or config.json), otherwise the temporary folder.
+/// Where the report goes: next to the executable, else next to config.json, else the temporary folder.
+/// The first folder that accepts the file wins.
 fn save(dir: &Path, pid: u16, text: &str) -> Result<PathBuf, String> {
     let name = format!("demonnapse-check-{pid:04X}.txt");
-    let first = dir.join(&name);
-    std::fs::write(&first, text).map(|_| first).or_else(|_| {
-        let tmp = std::env::temp_dir().join(&name);
-        std::fs::write(&tmp, text).map(|_| tmp.clone()).map_err(|e| format!("{}: {e}", tmp.display()))
-    })
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    let places = exe_dir.into_iter().chain([dir.to_path_buf(), std::env::temp_dir()]);
+    let mut last = String::new();
+    for place in places {
+        let path = place.join(&name);
+        match std::fs::write(&path, text) {
+            Ok(()) => return Ok(path),
+            Err(e) => last = format!("{}: {e}", path.display()),
+        }
+    }
+    Err(last)
 }
 
 pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
@@ -199,30 +223,38 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     }
     // A terminal does not wait for a program without a window of its own: it would read the keyboard
     // together with check. Check asks questions, so it gets its own console window.
-    println!("check opens in its own window: answer the questions there");
+    println!("check opens in its own window: follow the lines marked >> there");
     unsafe {
         let _ = FreeConsole();
         let _ = AllocConsole();
     }
-    let mut r = Report(String::new());
+    let mut r = Report { text: String::new(), path: None };
     let keys = keyboard();
-    let mut pid = 0;
-    let result = steps(dir, args, &mut r, &keys, &mut pid);
+    let result = steps(dir, args, &mut r, &keys);
     if let Err(e) = &result {
         say!(r, "\nstopped: {e}");
     }
-    match save(dir, pid, &r.0) {
-        Ok(path) => println!("\nReport saved to {}\nAttach it to a device report: https://github.com/gian0052/DemonNapse/issues/new?template=device_report.yml", path.display()),
-        Err(e) => println!("\nthe report could not be saved ({e}): copy the text above"),
+    println!();
+    let saved = match r.path.clone() {
+        Some(p) => Ok(p),
+        None => save(dir, 0, &r.text), // stopped before the mouse was picked
+    };
+    match saved {
+        Ok(path) => {
+            tell(&format!("Done. Report saved as {}", path.display()));
+            tell("Attach it to a device report: https://github.com/gian0052/DemonNapse/issues/new?template=device_report.yml");
+        }
+        Err(e) => tell(&format!("The report could not be saved ({e}): copy the text above.")),
     }
-    println!("Restart the daemon afterwards if you use it: schtasks /Run /TN DemonNapse");
-    ask("\nPress Enter to close this window.");
+    tell("If you use the daemon, start it again: schtasks /Run /TN DemonNapse");
+    ask(">> Press Enter to close this window.");
     let _ = keys.recv();
     result
 }
 
-fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<String>>, pid_out: &mut u16) -> Result<(), String> {
+fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<String>>) -> Result<(), String> {
     say!(r, "DemonNapse check {}", env!("CARGO_PKG_VERSION"));
+    tell("About two minutes. Do what the lines marked >> say; the rest is the report.");
     say!(r, "\n[1] Razer devices connected");
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
     let seen = razerhid::connected(&api);
@@ -234,7 +266,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     let cfg = Config::load(dir).ok();
     say!(r, "  config.json: {}", if cfg.is_some() { "found" } else { "not found, not needed by check" });
     let (pid, how) = pick(args, cfg.as_ref(), &seen)?;
-    *pid_out = pid;
+    r.path = save(dir, pid, &r.text).ok(); // from here on every line goes to the file at once
     let name = seen.iter().find(|(p, _)| *p == pid).map_or("", |(_, n)| n.as_str());
     say!(r, "  checking PID 0x{pid:04X} {name} ({how})");
     say!(r, "  model: {}", describe(pid));
@@ -313,7 +345,10 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
         }
     }
 
-    say!(r, "\n[5] Profile button: press the profile button now, several times ({BUTTON_SECONDS} s)");
+    say!(r, "\n[5] Profile button");
+    while keys.try_recv().is_ok() {} // an Enter typed earlier does not count
+    tell(&format!("Press Enter, then press the profile button under the mouse a few times, for {BUTTON_SECONDS} seconds."));
+    let _ = keys.recv(); // starts on Enter; without a keyboard it starts at once
     let events = razerhid::open_events(&api, pid);
     let mut buf = [0u8; 64];
     let (mut n_events, mut slots_seen) = (0, vec![active]);
@@ -363,12 +398,13 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     }
     let answer = razerhid::custom_frame_status(&ctl, &vec![(255, 0, 0); leds]).map_or_else(|e| format!("NO, not sent ({e})"), status);
     say!(r, "  per-LED frame (0F/03): {answer}");
+    tell("Look at the mouse: it turns red, then green, then blue.");
     show(&ctl, &vec![(255, 0, 0); leds], 1.0);
     show(&ctl, &vec![(0, 255, 0); leds], 1.0);
     show(&ctl, &vec![(0, 0, 255); leds], 1.0);
-    println!("  The whole mouse should have been red, then green, then blue.");
-    println!("  Now one LED at a time in white. For each one press Enter if it is lit, or type where it is");
-    println!("  (logo, wheel, left strip...), n if nothing is lit, q to stop.");
+    while keys.try_recv().is_ok() {} // an Enter typed during the colours does not count
+    tell("Now one LED at a time lights up white. For each one:");
+    tell("Enter = I see it, or type where it is (logo, wheel, left strip 1...). n = nothing lit. q = stop.");
     let mut answers = Vec::new();
     let mut interactive = true;
     for n in 0..leds {
@@ -394,7 +430,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
             Seen::NotLit => "NOT lit".to_string(),
             Seen::Stop => "stopped here".to_string(),
         };
-        r.0 += &format!("  LED {} of {leds}: {text}\n", n + 1);
+        r.note(format!("  LED {} of {leds}: {text}", n + 1));
         if s == Seen::Stop {
             break;
         }
