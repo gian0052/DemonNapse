@@ -403,8 +403,8 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     show(&ctl, &vec![(0, 255, 0); leds], 1.0);
     show(&ctl, &vec![(0, 0, 255); leds], 1.0);
     while keys.try_recv().is_ok() {} // an Enter typed during the colours does not count
-    tell("Now one LED at a time lights up white. For each one:");
-    tell("Enter = I see it, or type where it is (logo, wheel, left strip 1...). n = nothing lit. q = stop.");
+    tell("Now one LED at a time lights up white. For each one, type where it is on the mouse");
+    tell("(logo, wheel, left side 1...) and press Enter. Enter alone = lit. n = nothing lit. q = stop.");
     let mut answers = Vec::new();
     let mut interactive = true;
     for n in 0..leds {
