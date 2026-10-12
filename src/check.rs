@@ -393,7 +393,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     say!(r, "  LED count: {leds} (from {source})");
     if let Known::Leds(m) = mice::find(pid) {
         if !m.zones.is_empty() {
-            say!(r, "  zones in the tables: {} (the order is a guess)", m.zones);
+            say!(r, "  zones in the tables: {} (the order is a guess, confirmed only on the Basilisk V3 35K)", m.zones);
         }
     }
     let answer = razerhid::custom_frame_status(&ctl, &vec![(255, 0, 0); leds]).map_or_else(|e| format!("NO, not sent ({e})"), status);

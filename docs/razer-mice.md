@@ -36,6 +36,29 @@ Sources, facts only (IDs, counts, zone names), no code copied:
   how the profile commands (`0x05/0x80..0x84`, `0x05/0x04`) behave; that still has to come from
   reports of real mice.
 
+## Layouts verified by eye
+
+Where a mouse was walked with `check` (one LED at a time, the owner saying where each one is). LED
+numbers are the indices of the `0x0F/0x03` report, from 0.
+
+**Razer Basilisk V3 35K** (`0x00CB`, 11 LEDs, three runs on 2026-10-12, same answers each time):
+
+| LED | Where |
+|---|---|
+| 0 | logo |
+| 1 | scroll wheel |
+| 2, 3 | left side, front half, front to back |
+| 4, 5, 6 | left side, rear half, front to back |
+| 7, 8 | right side, rear half, back to front |
+| 9, 10 | right side, front half, back to front |
+
+So the strip goes round the mouse from the front of the left side to the front of the right side,
+five LEDs on the left (the thumb side, which is longer) and four on the right. OpenRGB's zone order
+"Logo 1, Scroll Wheel 1, LED Strip 9" is the index order on this mouse. Synapse's `LedMatrix` for
+it is a top view: left column = LEDs 2..6 top to bottom, right column = LEDs 10..7 top to bottom,
+wheel top centre, logo bottom centre. The Basilisk V3 (`0x0099`) has the same zones in OpenRGB and
+very likely the same order, not verified.
+
 ## Mice with per-LED lighting (OpenRGB)
 
 Sorted by LED count. Zones are listed in OpenRGB's order with their LED count; that order is not
