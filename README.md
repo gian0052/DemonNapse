@@ -1,7 +1,7 @@
 # DemonNapse
 
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-green)
-![Rust](https://img.shields.io/badge/rust-single%20526%20KB%20exe-orange)
+![Rust](https://img.shields.io/badge/rust-single%20587%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/58a3cbf6-8839-41dd-b0b0-5eb7c5125399
 Synapse's editor is fine; what's heavy is keeping it running. So DemonNapse does not give you
 a new editor to learn: it leaves the editing to Razer's own apps and takes over the playing.
 Build your profiles in Synapse and your lighting in Chroma Studio, as you always did. When you
-are done, close Synapse: DemonNapse (526 KB, under 2 MB of memory) takes its place and plays
+are done, close Synapse: DemonNapse (587 KB, under 2 MB of memory) takes its place and plays
 your Chroma Studio effects, one per on-board profile, switched with the profile button. Want
 to change something? Open Synapse again, edit, close it: DemonNapse picks up the new version
 by itself.
@@ -60,7 +60,7 @@ like Chroma Studio and only want it to stop running all day. [More projects comp
 |---|---|---|
 | RAM (private working set) | ~600 MB in the tray, ~940 MB with the window open | 1.5–2 MB |
 | CPU | — | ~0.1 % of one core, ~0.3 % with the Audio Meter following music |
-| Executable | — | one 526 KB file |
+| Executable | — | one 587 KB file |
 
 <sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4) on 11 October 2026,
 all Razer processes summed. One machine, not a benchmark; yours will differ.</sub>
