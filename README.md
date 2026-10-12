@@ -8,6 +8,8 @@
 **DemonNapse is a small Windows program that plays your Razer mouse's lighting effects
 without keeping Synapse running.**
 
+https://github.com/user-attachments/assets/58a3cbf6-8839-41dd-b0b0-5eb7c5125399
+
 Synapse's editor is fine; what's heavy is keeping it running. So DemonNapse does not give you
 a new editor to learn: it leaves the editing to Razer's own apps and takes over the playing.
 Build your profiles in Synapse and your lighting in Chroma Studio, as you always did. When you
