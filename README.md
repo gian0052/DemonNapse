@@ -132,6 +132,8 @@ an error.
   profiles, the supported layers, the hand-over with Synapse.
 - [Reference](docs/reference.md): `config.json`, the other commands, the log, uninstalling.
 - [How it compares](docs/comparison.md): the full table of the projects I looked at.
+- [Razer mice](docs/razer-mice.md): LED count, layout, colour command and transaction id of
+  every Razer mouse with per-LED lighting, for checking support on a new model.
 
 ## Acknowledgements
 
