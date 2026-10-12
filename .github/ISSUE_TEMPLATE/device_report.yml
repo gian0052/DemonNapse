@@ -7,7 +7,8 @@ body:
     attributes:
       value: |
         Thanks for testing. Close Synapse, stop the daemon if it runs (`schtasks /End /TN DemonNapse`),
-        then run `demonnapse.exe check` from a terminal.
+        then run `demonnapse.exe check` from a terminal: it opens its own window and saves the report as
+        `demonnapse-check-XXXX.txt` next to `demonnapse.exe`.
         The report shows the mouse's PID and firmware version and the names of your on-board profiles,
         no serial numbers; read it before pasting.
   - type: input
@@ -28,15 +29,15 @@ body:
   - type: textarea
     id: check
     attributes:
-      label: Output of "demonnapse.exe check"
-      description: Paste all of it.
+      label: Report of "demonnapse.exe check"
+      description: Paste the whole demonnapse-check-XXXX.txt file.
       render: text
     validations:
       required: true
   - type: dropdown
     id: leds
     attributes:
-      label: Did every LED light up in turn (red, green, blue, then one at a time in white)?
+      label: Did every LED light up in turn (red, green, blue, then one at a time in white, as you answered in the report)?
       options:
         - "Yes, all of them"
         - "Some did not light up, or lit in the wrong order"

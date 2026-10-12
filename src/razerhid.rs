@@ -93,11 +93,25 @@ pub fn open_events(api: &HidApi, pid: u16) -> Vec<HidDevice> {
         .collect()
 }
 
-/// Colour per single LED (effect 0x0F/0x03). Send only: the mouse does not answer every frame.
-pub fn custom_frame(h: &HidDevice, colors: &[Rgb]) -> Result<(), String> {
+/// LEDs one 0x0F/0x03 report holds (80 bytes of arguments: 5 of header, 3 per LED). Every Razer mouse
+/// fits (docs/razer-mice.md: 21 at most); the rest of a longer frame is dropped.
+pub const MAX_FRAME_LEDS: usize = 25;
+
+fn frame_report(colors: &[Rgb]) -> [u8; 90] {
+    let colors = &colors[..colors.len().min(MAX_FRAME_LEDS)];
     let mut args = vec![0, 0, 0, 0, colors.len().saturating_sub(1) as u8];
     args.extend(colors.iter().flat_map(|c| [c.0, c.1, c.2]));
-    send(h, &build(0x0F, 0x03, args.len() as u8, &args))
+    build(0x0F, 0x03, args.len() as u8, &args)
+}
+
+/// Colour per single LED (effect 0x0F/0x03). Send only: the mouse does not answer every frame.
+pub fn custom_frame(h: &HidDevice, colors: &[Rgb]) -> Result<(), String> {
+    send(h, &frame_report(colors))
+}
+
+/// Like `custom_frame`, but reads the mouse's answer: its status byte (0x02 = done, 0x05 = not supported).
+pub fn custom_frame_status(h: &HidDevice, colors: &[Rgb]) -> Result<u8, String> {
+    transact(h, &frame_report(colors)).map(|r| r[0])
 }
 
 /// Mouse mode: 0 = normal (the buttons are handled by the mouse, on-board profiles included),

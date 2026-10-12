@@ -18,7 +18,7 @@ talk to the mouse, `probe`):
 
 | command | what it does |
 |---|---|
-| `check [PID]` | tries a Razer mouse step by step (see [Devices](../README.md#devices)) and prints a report |
+| `check [PID]` | tries a Razer mouse step by step in its own window (see [Devices](../README.md#devices)) and saves the report as `demonnapse-check-XXXX.txt` |
 | `extract [--out FOLDER]` | effects and profiles from Synapse's logs, written next to `config.json` or in `FOLDER` |
 | `profiles` | profile → matched effect, as JSON |
 | `probe` | firmware, active slot and device mode of the mouse |

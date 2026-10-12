@@ -6,14 +6,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        DemonNapse is verified on the Razer Basilisk V3 35K (wired) only. Wireless mice and keyboards are
-        not supported, and there is no plan for them yet. For a wired Razer mouse that `check` cannot
-        handle, fill this in: the more of it you can provide, the more likely the model gets added.
+        DemonNapse is verified on the Razer Basilisk V3 35K (wired) only. Other Razer mice, wired or
+        through their wireless dongle, should work but have not been tried yet; keyboards are not supported.
+        For a Razer mouse that `check` cannot handle, fill this in: the more of it you can provide, the
+        more likely the model gets added.
   - type: input
     id: model
     attributes:
       label: Mouse model
-      placeholder: Razer DeathAdder V3 (wired)
+      placeholder: Razer Naga Pro (wireless, through its dongle)
     validations:
       required: true
   - type: input
@@ -21,7 +22,7 @@ body:
     attributes:
       label: USB product id
       description: '"demonnapse.exe check" lists the connected Razer devices with their PID; Device Manager shows it too (VID_1532&PID_xxxx).'
-      placeholder: "0x00B2"
+      placeholder: "0x0090"
   - type: input
     id: version
     attributes:
@@ -32,7 +33,7 @@ body:
   - type: textarea
     id: check
     attributes:
-      label: Output of "demonnapse.exe check", up to where it stops
+      label: Report of "demonnapse.exe check" (demonnapse-check-XXXX.txt), up to where it stops
       render: text
     validations:
       required: true

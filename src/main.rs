@@ -1,7 +1,7 @@
 //! DemonNapse - lightweight companion daemon for Razer Synapse.
 //!
 //!   demonnapse [-v]        the daemon (no window; log to demonnapse.log if there is no terminal)
-//!   demonnapse check [PID]  tests a Razer mouse step by step and prints a report to paste into an issue
+//!   demonnapse check [PID]  tests a Razer mouse step by step in its own window and saves a report for an issue
 //!
 //! Tools to verify the daemon piece by piece:
 //!   demonnapse render "<effect>" <t0> <frames> <fps> [--layer NAME] [--all] [--clicks S,S] [--live]   frames in hexadecimal
@@ -23,6 +23,7 @@ mod daemon;
 mod effect;
 mod extract;
 mod layers;
+mod mice;
 mod profiles;
 mod razerhid;
 mod screen;

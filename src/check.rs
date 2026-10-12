@@ -1,20 +1,42 @@
-//! `demonnapse check [PID]`: tests step by step whether a Razer mouse works with DemonNapse and prints
-//! a report to paste into an issue. It is for people with a model other than the Basilisk V3 35K.
+//! `demonnapse check [PID]`: tests step by step whether a Razer mouse works with DemonNapse and writes
+//! a report to attach to an issue. It is for people with a model other than the Basilisk V3 35K, so it
+//! works without config.json, says what the mouse is from the tables in `mice`, asks the user about
+//! every LED and saves the report next to the executable.
 //! Reads only, plus switching the active slot (like the button, then back as it was) and a few
 //! colours on the LEDs: nothing is written to the mouse's memory.
 
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::layers::Rgb;
+use crate::mice::{self, Known};
 use crate::{extract, razerhid, synapse};
 use hidapi::{HidApi, HidDevice};
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use windows::core::w;
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+use windows::Win32::System::Console::{AllocConsole, FreeConsole};
 use windows::Win32::System::Threading::CreateMutexW;
 
 const BUTTON_SECONDS: u64 = 15;
+const BLACK: Rgb = (0, 0, 0);
+
+/// Everything printed, also kept to be saved as the report.
+struct Report(String);
+
+impl Report {
+    fn line(&mut self, s: String) {
+        println!("{s}");
+        self.0 += &s;
+        self.0.push('\n');
+    }
+}
+
+macro_rules! say {
+    ($r:expr, $($t:tt)*) => { $r.line(format!($($t)*)) };
+}
 
 fn yes(ok: bool) -> &'static str {
     if ok {
@@ -33,15 +55,137 @@ fn query(h: &HidDevice, class: u8, id: u8, size: u8) -> Option<[u8; 90]> {
     razerhid::transact(h, &razerhid::build(class, id, size, &[])).ok().filter(|r| r[0] == 0x02)
 }
 
-fn show(h: &HidDevice, leds: usize, color: impl Fn(usize) -> Rgb, seconds: f64) -> bool {
-    let frame: Vec<Rgb> = (0..leds).map(color).collect();
+/// The status byte of a Razer response, in words.
+fn status(s: u8) -> String {
+    match s {
+        0x02 => "OK, the mouse accepted it".into(),
+        0x05 => "NO, the mouse answered \"not supported\" (0x05)".into(),
+        0x03 => "NO, the mouse answered \"failure\" (0x03)".into(),
+        0x01 => "busy (0x01), no clear answer".into(),
+        0x04 => "timeout (0x04), no clear answer".into(),
+        s => format!("unknown answer 0x{s:02X}"),
+    }
+}
+
+fn show(h: &HidDevice, frame: &[Rgb], seconds: f64) -> bool {
     let start = Instant::now();
     let mut ok = true;
     while start.elapsed().as_secs_f64() < seconds {
-        ok &= razerhid::custom_frame(h, &frame).is_ok();
+        ok &= razerhid::custom_frame(h, frame).is_ok();
         sleep(Duration::from_millis(100));
     }
     ok
+}
+
+/// Lines typed by the user, read on their own thread so the LEDs keep being refreshed meanwhile;
+/// `None` once there is no keyboard (input redirected or closed).
+fn keyboard() -> Receiver<Option<String>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || loop {
+        let mut line = String::new();
+        let got = std::io::stdin().read_line(&mut line);
+        let msg = match got {
+            Ok(1..) => Some(line.trim().to_string()),
+            _ => None,
+        };
+        let end = msg.is_none();
+        if tx.send(msg).is_err() || end {
+            break;
+        }
+    });
+    rx
+}
+
+/// What the user said about one LED.
+#[derive(Debug, PartialEq)]
+enum Seen {
+    Lit(String), // where, if they wrote it
+    NotLit,
+    Stop,
+}
+
+fn understand(answer: &str) -> Seen {
+    match answer.to_lowercase().as_str() {
+        "" | "y" | "yes" | "s" | "si" | "sì" => Seen::Lit(String::new()),
+        "n" | "no" => Seen::NotLit,
+        "q" | "quit" | "stop" => Seen::Stop,
+        _ => Seen::Lit(answer.to_string()),
+    }
+}
+
+/// Keeps `frame` on the mouse until the user answers; `None` when there is no keyboard to answer with.
+fn hold(h: &HidDevice, frame: &[Rgb], keys: &Receiver<Option<String>>) -> Option<String> {
+    loop {
+        let _ = razerhid::custom_frame(h, frame);
+        match keys.recv_timeout(Duration::from_millis(100)) {
+            Ok(answer) => return answer,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+}
+
+fn ask(prompt: &str) {
+    print!("{prompt} ");
+    let _ = std::io::stdout().flush();
+}
+
+/// The LED count from the walk without a known count: the last LED seen lit, stopping after two dark ones.
+fn count_from(answers: &[Seen]) -> usize {
+    answers.iter().rposition(|s| matches!(s, Seen::Lit(_))).map_or(0, |i| i + 1)
+}
+
+/// The note about slot 1, which the daemon skips by default because it is Hybrid Storage on the 35K.
+fn slot1_note(profiles: &[extract::Profile], skip: &[u8]) -> String {
+    match (profiles.iter().find(|p| p.slot == 1), skip.contains(&1)) {
+        (Some(p), true) => format!(
+            "WARNING: slot 1 holds the profile '{}', but the daemon skips slot 1 (Hybrid Storage on the Basilisk V3 35K): set \"skip_slots\": [] in config.json",
+            p.name
+        ),
+        (Some(p), false) => format!("slot 1 holds the profile '{}' and is not skipped", p.name),
+        (None, _) => "no Synapse profile on slot 1 (on the Basilisk V3 35K it is Hybrid Storage, skipped)".into(),
+    }
+}
+
+/// What the tables know about a PID, in one line.
+fn describe(pid: u16) -> String {
+    match mice::find(pid) {
+        Known::Leds(m) if m.extended => format!("{}, {} LEDs ({})", m.name, m.leds, if m.zones.is_empty() { "zones unknown" } else { m.zones }),
+        Known::Leds(m) => format!("{}, {} LEDs, older colour command that DemonNapse does not send yet", m.name, m.leds),
+        Known::NoLeds(n) => format!("{n}, no per-LED lighting according to OpenRazer"),
+        Known::Unknown => "not in the tables of OpenRGB and OpenRazer (docs/razer-mice.md)".into(),
+    }
+}
+
+/// The mouse to check: the PID given, the one in config.json, the one Synapse calls a mouse, otherwise
+/// the only connected device the tables know as a mouse.
+fn pick(args: &[String], cfg: Option<&Config>, seen: &[(u16, String)]) -> Result<(u16, &'static str), String> {
+    if let Some(a) = args.first() {
+        let pid = u16::from_str_radix(a.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| format!("'{a}' is not a PID like 0x00CB"))?;
+        return Ok((pid, "given on the command line"));
+    }
+    if let Some(pid) = cfg.and_then(|c| c.mouse().ok()) {
+        return Ok((pid, "from config.json or found by the daemon's rule"));
+    }
+    let synapse = config::choose_mouse(seen, &extract::categories());
+    if let Ok((pid, _)) = synapse {
+        return Ok((pid, "the one Synapse calls a mouse"));
+    }
+    let known: Vec<u16> = seen.iter().map(|(p, _)| *p).filter(|&p| !matches!(mice::find(p), Known::Unknown)).collect();
+    match known[..] {
+        [pid] => Ok((pid, "the only connected Razer mouse in the tables")),
+        _ => Err(format!("{} (run check 0x00XX with the PID of the mouse, from the list above)", synapse.unwrap_err())),
+    }
+}
+
+/// Where the report goes: next to the executable (or config.json), otherwise the temporary folder.
+fn save(dir: &Path, pid: u16, text: &str) -> Result<PathBuf, String> {
+    let name = format!("demonnapse-check-{pid:04X}.txt");
+    let first = dir.join(&name);
+    std::fs::write(&first, text).map(|_| first).or_else(|_| {
+        let tmp = std::env::temp_dir().join(&name);
+        std::fs::write(&tmp, text).map(|_| tmp.clone()).map_err(|e| format!("{}: {e}", tmp.display()))
+    })
 }
 
 pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
@@ -53,63 +197,110 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     if synapse::running() {
         return Err("Synapse is open: close it completely (tray -> Exit), then run check again".into());
     }
+    // A terminal does not wait for a program without a window of its own: it would read the keyboard
+    // together with check. Check asks questions, so it gets its own console window.
+    println!("check opens in its own window: answer the questions there");
+    unsafe {
+        let _ = FreeConsole();
+        let _ = AllocConsole();
+    }
+    let mut r = Report(String::new());
+    let keys = keyboard();
+    let mut pid = 0;
+    let result = steps(dir, args, &mut r, &keys, &mut pid);
+    if let Err(e) = &result {
+        say!(r, "\nstopped: {e}");
+    }
+    match save(dir, pid, &r.0) {
+        Ok(path) => println!("\nReport saved to {}\nAttach it to a device report: https://github.com/gian0052/DemonNapse/issues/new?template=device_report.yml", path.display()),
+        Err(e) => println!("\nthe report could not be saved ({e}): copy the text above"),
+    }
+    println!("Restart the daemon afterwards if you use it: schtasks /Run /TN DemonNapse");
+    ask("\nPress Enter to close this window.");
+    let _ = keys.recv();
+    result
+}
 
-    println!("DemonNapse check {}", env!("CARGO_PKG_VERSION"));
-    println!("\n[1] Razer devices connected");
+fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<String>>, pid_out: &mut u16) -> Result<(), String> {
+    say!(r, "DemonNapse check {}", env!("CARGO_PKG_VERSION"));
+    say!(r, "\n[1] Razer devices connected");
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
     let seen = razerhid::connected(&api);
     let categories = extract::categories();
     for (pid, name) in &seen {
-        println!("  PID 0x{pid:04X}  {name}  ({})", categories.get(pid).map_or("type unknown to Synapse", String::as_str));
+        let synapse = categories.get(pid).map_or("type unknown to Synapse", String::as_str);
+        say!(r, "  PID 0x{pid:04X}  {name}  ({synapse}; {})", mice::name(*pid).unwrap_or("not in the tables"));
     }
     let cfg = Config::load(dir).ok();
-    let pid = match args.first() {
-        Some(a) => u16::from_str_radix(a.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| format!("'{a}' is not a PID like 0x00CB"))?,
-        None => cfg.as_ref().ok_or("config.json not found")?.mouse().map_err(|e| format!("{e} (or run check 0x00XX with the PID above)"))?,
-    };
+    say!(r, "  config.json: {}", if cfg.is_some() { "found" } else { "not found, not needed by check" });
+    let (pid, how) = pick(args, cfg.as_ref(), &seen)?;
+    *pid_out = pid;
     let name = seen.iter().find(|(p, _)| *p == pid).map_or("", |(_, n)| n.as_str());
-    let how = match (args.first(), cfg.as_ref().and_then(|c| c.detected.as_ref())) {
-        (Some(_), _) => "given on the command line",
-        (None, Some(Ok(_))) => "detected",
-        _ => "from config.json",
-    };
-    println!("  checking PID 0x{pid:04X} {name} ({how})");
+    say!(r, "  checking PID 0x{pid:04X} {name} ({how})");
+    say!(r, "  model: {}", describe(pid));
+    let connection = mice::name(pid).and_then(mice::connection);
+    say!(r, "  connection: {}", connection.unwrap_or("not told by the PID (say it in the issue: cable, dongle or Bluetooth)"));
+    if let Known::NoLeds(_) = mice::find(pid) {
+        say!(r, "  this mouse has no LEDs DemonNapse can drive one by one: the effects cannot be played on it, the rest is checked anyway");
+    }
 
-    println!("\n[2] Control interface");
+    say!(r, "\n[2] Control interface");
     let (ctl, resp) = razerhid::open_control(&mut api, pid, 2).map_err(|e| format!("{e}: this device does not answer the Razer protocol the way DemonNapse speaks it"))?;
-    println!("  transaction id: 0x{:02X}", razerhid::transaction_id());
-    println!("  firmware: {}.{}", resp[8], resp[9]);
-    println!("  device mode: {:?} (0 = normal, 3 = driver)", razerhid::get_device_mode(&ctl));
+    say!(r, "  transaction id: 0x{:02X}", razerhid::transaction_id());
+    say!(r, "  firmware: {}.{}", resp[8], resp[9]);
+    say!(r, "  device mode: {:?} (0 = normal, 3 = driver)", razerhid::get_device_mode(&ctl));
 
-    println!("\n[3] Synapse's logs");
+    say!(r, "\n[3] Synapse's logs");
     let tmp = std::env::temp_dir().join("demonnapse-check");
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    let map = extract::device(&tmp, pid);
-    match &map {
-        Ok(m) => println!("  LED map: OK, {} LEDs, {} grid cells", m.leds, m.chroma_grid.len()),
-        Err(e) => println!("  LED map: NO ({e})"),
+    // a wireless mouse may be logged under its wired PID: same model, same LEDs
+    let mut map = extract::device(&tmp, pid).map(|m| (m, pid));
+    if map.is_err() {
+        if let Some(found) = mice::siblings(pid).into_iter().find_map(|o| extract::device(&tmp, o).ok().map(|m| (m, o))) {
+            map = Ok(found);
+        }
     }
-    match extract::profiles(&tmp, pid) {
-        Ok(ps) => println!("  profiles: OK, {}", ps.iter().map(|p| format!("slot {} '{}'", p.slot, p.name)).collect::<Vec<_>>().join(", ")),
-        Err(e) => println!("  profiles: NO ({e})"),
+    match &map {
+        Ok((m, from)) => {
+            let rows = m.chroma_grid.iter().map(|(cell, led)| format!("{cell}->{led}")).collect::<Vec<_>>().join(" ");
+            let borrowed = if *from == pid { String::new() } else { format!(", logged under PID 0x{from:04X} (same model)") };
+            say!(r, "  LED map: OK, {} LEDs, {} grid cells{borrowed}", m.leds, m.chroma_grid.len());
+            say!(r, "  grid (Chroma Studio cell -> LED): {rows}");
+            if let Known::Leds(t) = mice::find(pid) {
+                if t.leds != m.leds {
+                    say!(r, "  note: the tables say {} LEDs, Synapse {}", t.leds, m.leds);
+                }
+            }
+        }
+        Err(e) => say!(r, "  LED map: NO ({e}). Open Chroma Studio once with this mouse connected, close Synapse and run check again"),
+    }
+    let profiles = extract::profiles(&tmp, pid).unwrap_or_default();
+    if profiles.is_empty() {
+        say!(r, "  profiles: NO (no profile of this mouse in Synapse's logs)");
+    } else {
+        say!(r, "  profiles: OK, {}", profiles.iter().map(|p| format!("slot {} '{}'", p.slot, p.name)).collect::<Vec<_>>().join(", "));
     }
     match extract::effects(&tmp) {
-        Ok(fx) => println!("  Chroma Studio effects: OK, {}", fx.len()),
-        Err(e) => println!("  Chroma Studio effects: NO ({e})"),
+        Ok(fx) => say!(r, "  Chroma Studio effects: OK, {}", fx.len()),
+        Err(e) => say!(r, "  Chroma Studio effects: NO ({e})"),
     }
 
-    println!("\n[4] On-board profiles");
+    say!(r, "\n[4] On-board profiles");
     let count = query(&ctl, 0x05, 0x80, 0x01);
     let slots = query(&ctl, 0x05, 0x81, 0x0A);
     let active = razerhid::get_active_profile(&ctl);
-    println!("  number of profiles (05/80): {}", count.map_or("NO".into(), |r| hex(&r[8..10])));
-    println!("  slots (05/81): {}", slots.map_or("NO".into(), |r| hex(&r[8..18])));
-    println!("  active slot (05/84): {}", active.map_or("NO".into(), |s| s.to_string()));
+    say!(r, "  number of profiles (05/80): {}", count.map_or("NO".into(), |r| hex(&r[8..10])));
+    say!(r, "  slots (05/81): {}", slots.map_or("NO".into(), |r| hex(&r[8..18])));
+    say!(r, "  active slot (05/84): {}", active.map_or("NO".into(), |s| s.to_string()));
+    let skip = cfg.as_ref().map_or(vec![1], |c| c.skip_slots.clone());
+    if !profiles.is_empty() {
+        say!(r, "  {}", slot1_note(&profiles, &skip));
+    }
     let mut switch_ok = None;
-    if let (Some(from), Some(r)) = (active, slots) {
+    if let (Some(from), Some(resp)) = (active, slots) {
         // 05/81 = [capacity, slots...]: I try switching to another slot and back
         // preferably not slot 1 (Hybrid Storage on the 35K): the daemon jumps towards the normal slots
-        let list: Vec<u8> = r[9..9 + (r[8] as usize).min(8)].iter().copied().filter(|&s| s != 0 && s != from).collect();
+        let list: Vec<u8> = resp[9..9 + (resp[8] as usize).min(8)].iter().copied().filter(|&s| s != 0 && s != from).collect();
         if let Some(to) = list.iter().copied().find(|&s| s != 1).or(list.first().copied()) {
             let go = |slot: u8| razerhid::set_active_profile(&ctl, slot) && { sleep(Duration::from_millis(300)); razerhid::get_active_profile(&ctl) == Some(slot) };
             // a second attempt: if someone presses the button in the meantime the first one fails
@@ -118,11 +309,11 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
                 razerhid::set_active_profile(&ctl, from);
             }
             switch_ok = Some(ok);
-            println!("  switch slot {from} -> {to} -> {from} (05/04): {}", yes(ok));
+            say!(r, "  switch slot {from} -> {to} -> {from} (05/04): {}", yes(ok));
         }
     }
 
-    println!("\n[5] Profile button: press the profile button under the mouse now ({BUTTON_SECONDS} s)");
+    say!(r, "\n[5] Profile button: press the profile button now, several times ({BUTTON_SECONDS} s)");
     let events = razerhid::open_events(&api, pid);
     let mut buf = [0u8; 64];
     let (mut n_events, mut slots_seen) = (0, vec![active]);
@@ -133,7 +324,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
             while let Ok(n @ 1..) = h.read_timeout(&mut buf, 1) {
                 if n >= 2 && buf[0] == 0x05 {
                     n_events += 1;
-                    println!("  event {}", hex(&buf[..n.min(6)]));
+                    say!(r, "  event {}", hex(&buf[..n.min(6)]));
                 }
             }
         }
@@ -141,42 +332,137 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
             last_poll = Instant::now();
             let s = razerhid::get_active_profile(&ctl);
             if s.is_some() && slots_seen.last() != Some(&s) {
-                println!("  active slot -> {}", s.unwrap_or(0));
+                say!(r, "  active slot -> {}", s.unwrap_or(0));
                 slots_seen.push(s);
             }
         }
         sleep(Duration::from_millis(5));
     }
     let button_ok = slots_seen.len() > 1;
-    println!("  event interfaces: {}, \"05 xx\" events: {n_events}, slot changed: {}", events.len(), yes(button_ok));
+    say!(r, "  event interfaces: {}, \"05 xx\" events: {n_events}, slot changed: {}", events.len(), yes(button_ok));
     if let (Some(from), true) = (active, button_ok) {
         razerhid::set_active_profile(&ctl, from); // I put the starting slot back
     }
 
-    println!("\n[6] LEDs: watch the mouse (red, green, blue, then one LED at a time in white)");
-    let leds = map.as_ref().map_or(0, |m| m.leds);
-    let mut led_ok = None;
-    if leds > 0 {
-        let mut ok = show(&ctl, leds, |_| (255, 0, 0), 1.0);
-        ok &= show(&ctl, leds, |_| (0, 255, 0), 1.0);
-        ok &= show(&ctl, leds, |_| (0, 0, 255), 1.0);
-        for n in 0..leds {
-            ok &= show(&ctl, leds, |i| if i == n { (255, 255, 255) } else { (0, 0, 0) }, 0.5);
+    say!(r, "\n[6] LEDs: look at the mouse");
+    let table = match mice::find(pid) {
+        Known::Leds(m) => Some(m.leds),
+        _ => None,
+    };
+    let (leds, source) = match (&map, table) {
+        (Ok((m, _)), _) => (m.leds, "Synapse"),
+        (Err(_), Some(n)) => (n, "the tables"),
+        (Err(_), None) => (razerhid::MAX_FRAME_LEDS, "unknown: trying up to 25"),
+    };
+    let leds = leds.min(razerhid::MAX_FRAME_LEDS);
+    say!(r, "  LED count: {leds} (from {source})");
+    if let Known::Leds(m) = mice::find(pid) {
+        if !m.zones.is_empty() {
+            say!(r, "  zones in the tables: {} (the order is a guess)", m.zones);
         }
-        ok &= show(&ctl, leds, |_| (0, 0, 0), 0.2);
-        led_ok = Some(ok);
-        println!("  per-LED frames (0F/03) sent: {}. Did every LED light up in turn? Say so in the report.", yes(ok));
-    } else {
-        println!("  skipped: no LED count (no LED map in Synapse's logs)");
+    }
+    let answer = razerhid::custom_frame_status(&ctl, &vec![(255, 0, 0); leds]).map_or_else(|e| format!("NO, not sent ({e})"), status);
+    say!(r, "  per-LED frame (0F/03): {answer}");
+    show(&ctl, &vec![(255, 0, 0); leds], 1.0);
+    show(&ctl, &vec![(0, 255, 0); leds], 1.0);
+    show(&ctl, &vec![(0, 0, 255); leds], 1.0);
+    println!("  The whole mouse should have been red, then green, then blue.");
+    println!("  Now one LED at a time in white. For each one press Enter if it is lit, or type where it is");
+    println!("  (logo, wheel, left strip...), n if nothing is lit, q to stop.");
+    let mut answers = Vec::new();
+    let mut interactive = true;
+    for n in 0..leds {
+        let frame: Vec<Rgb> = (0..leds).map(|i| if i == n { (255, 255, 255) } else { BLACK }).collect();
+        let s = if interactive {
+            ask(&format!("  LED {} of {leds}:", n + 1));
+            match hold(&ctl, &frame, keys) {
+                Some(a) => understand(&a),
+                None => {
+                    interactive = false; // no keyboard: the walk goes on by itself, half a second per LED
+                    println!();
+                    show(&ctl, &frame, 0.5);
+                    Seen::Lit("not asked".into())
+                }
+            }
+        } else {
+            show(&ctl, &frame, 0.5);
+            Seen::Lit("not asked".into())
+        };
+        let text = match &s {
+            Seen::Lit(w) if w.is_empty() => "lit".to_string(),
+            Seen::Lit(w) => format!("lit ({w})"),
+            Seen::NotLit => "NOT lit".to_string(),
+            Seen::Stop => "stopped here".to_string(),
+        };
+        r.0 += &format!("  LED {} of {leds}: {text}\n", n + 1);
+        if s == Seen::Stop {
+            break;
+        }
+        answers.push(s);
+        // without a known count, two dark LEDs in a row mean the mouse has no more
+        if table.is_none() && map.is_err() && answers.len() >= 2 && answers[answers.len() - 2..].iter().all(|a| *a == Seen::NotLit) {
+            break;
+        }
+    }
+    show(&ctl, &vec![BLACK; leds], 0.2);
+    let lit = answers.iter().filter(|a| matches!(a, Seen::Lit(_))).count();
+    let dark = answers.iter().filter(|a| **a == Seen::NotLit).count();
+    if table.is_none() && map.is_err() && interactive {
+        say!(r, "  LED count found by hand: {}", count_from(&answers));
     }
 
-    println!("\n== Summary (copy everything from \"DemonNapse check\" into a GitHub issue) ==");
-    println!("device: PID 0x{pid:04X} {name}, firmware {}.{}, transaction id 0x{:02X}", resp[8], resp[9], razerhid::transaction_id());
-    println!("LED map from Synapse: {}", yes(map.is_ok()));
-    println!("read active slot: {}", yes(active.is_some()));
-    println!("switch slot: {}", switch_ok.map_or("not tried (one slot only?)", yes));
-    println!("profile button seen: {}", yes(button_ok));
-    println!("per-LED frames: {}", led_ok.map_or("not tried", yes));
-    println!("Restart the daemon afterwards: schtasks /Run /TN DemonNapse");
+    say!(r, "\n== Summary ==");
+    say!(r, "device: PID 0x{pid:04X} {name}, firmware {}.{}, transaction id 0x{:02X}", resp[8], resp[9], razerhid::transaction_id());
+    say!(r, "model: {}", describe(pid));
+    say!(r, "connection: {}", connection.unwrap_or("unknown"));
+    say!(r, "LED map from Synapse: {}", yes(map.is_ok()));
+    say!(r, "profiles in Synapse's logs: {}", profiles.len());
+    say!(r, "read active slot: {}", yes(active.is_some()));
+    say!(r, "switch slot: {}", switch_ok.map_or("not tried (one slot only?)", yes));
+    say!(r, "profile button seen: {}", yes(button_ok));
+    say!(r, "per-LED frame: {answer}");
+    if interactive {
+        say!(r, "LEDs lit one at a time: {lit} of {}, not lit: {dark}", answers.len());
+    } else {
+        say!(r, "LEDs lit one at a time: not asked (no keyboard), say in the issue what you saw");
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extract::Profile;
+
+    #[test]
+    fn answers() {
+        assert_eq!(understand(""), Seen::Lit(String::new()));
+        assert_eq!(understand("N"), Seen::NotLit);
+        assert_eq!(understand("q"), Seen::Stop);
+        assert_eq!(understand("left strip"), Seen::Lit("left strip".into()));
+    }
+
+    #[test]
+    fn led_count_by_hand() {
+        let l = || Seen::Lit(String::new());
+        assert_eq!(count_from(&[l(), l(), l(), Seen::NotLit, Seen::NotLit]), 3);
+        assert_eq!(count_from(&[l(), Seen::NotLit, l(), Seen::NotLit, Seen::NotLit]), 3, "a dark LED in the middle does not end the count");
+        assert_eq!(count_from(&[Seen::NotLit, Seen::NotLit]), 0);
+    }
+
+    #[test]
+    fn slot_one() {
+        let p = |slot, name: &str| Profile { name: name.into(), slot };
+        assert!(slot1_note(&[p(1, "Gaming"), p(2, "Work")], &[1]).starts_with("WARNING"), "a real profile on slot 1 would be skipped");
+        assert!(!slot1_note(&[p(1, "Gaming")], &[]).starts_with("WARNING"));
+        assert!(slot1_note(&[p(2, "Work"), p(3, "Gaming")], &[1]).starts_with("no Synapse profile on slot 1"));
+    }
+
+    #[test]
+    fn picks_from_the_tables_when_synapse_does_not_know() {
+        let seen = vec![(0x0090, "Razer Naga Pro".to_string()), (0x028F, "some keyboard".to_string())];
+        assert_eq!(pick(&[], None, &seen).unwrap().0, 0x0090);
+        assert_eq!(pick(&["0x00CB".into()], None, &seen).unwrap().0, 0x00CB, "the PID given wins");
+        assert!(pick(&["zz".into()], None, &seen).is_err());
+    }
 }

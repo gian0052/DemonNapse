@@ -102,10 +102,12 @@ keyboard plugged in next to it is left alone.
 
 **Own a different Razer mouse? Two minutes of yours put it on the list.** Close Synapse (and
 stop the daemon if it is installed: `schtasks /End /TN DemonNapse`), then run
-`demonnapse.exe check`: in about 30 seconds it opens the mouse, reads its profiles, asks
-you to press the profile button and lights the LEDs one at a time. Nothing is written to the
-mouse memory. Then paste the output in a
-[device report](../../issues/new?template=device_report.yml), or open a
+`demonnapse.exe check`. It opens its own window and in about two minutes tells you which
+model it found (from the tables in [Razer mice](docs/razer-mice.md)), opens the mouse, reads
+its profiles, asks you to press the profile button and lights the LEDs one at a time, asking
+you whether each one lit. No `config.json` is needed and nothing is written to the mouse
+memory. It saves the report as `demonnapse-check-XXXX.txt` next to `demonnapse.exe`: attach it
+to a [device report](../../issues/new?template=device_report.yml), or to a
 [device support request](../../issues/new?template=device_support.yml) if `check` stops with
 an error.
 
