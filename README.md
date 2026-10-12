@@ -56,12 +56,12 @@ like Chroma Studio and only want it to stop running all day. [More projects comp
 
 | | Synapse 4 + services | DemonNapse |
 |---|---|---|
-| RAM (private working set) | ~650 MB + 168 MB | 1.5–2 MB |
+| RAM (private working set) | ~600 MB in the tray, ~940 MB with the window open | 1.5–2 MB |
 | CPU | — | ~0.1 % of one core, ~0.3 % with the Audio Meter following music |
 | Executable | — | one 526 KB file |
 
-<sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4). One machine, not a
-benchmark; yours will differ.</sub>
+<sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4) on 11 October 2026,
+all Razer processes summed. One machine, not a benchmark; yours will differ.</sub>
 
 One layer is heavy: **Ambient Awareness** reads the screen, which costs about 55 MB more while
 an effect that uses it is on the mouse, and nothing otherwise.
