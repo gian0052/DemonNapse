@@ -10,6 +10,9 @@ without keeping Synapse running.**
 
 https://github.com/user-attachments/assets/45d69d0a-e1d3-46b5-bd68-252f78d5a65e
 
+**[Download the latest release](../../releases/latest)** · Own a different Razer mouse?
+[Try it in two minutes](#devices).
+
 Synapse's editor is fine; what's heavy is keeping it running. So DemonNapse does not give you
 a new editor to learn: it leaves the editing to Razer's own apps and takes over the playing.
 Build your profiles in Synapse and your lighting in Chroma Studio, as you always did. When you
