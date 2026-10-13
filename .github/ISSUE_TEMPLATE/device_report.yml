@@ -1,5 +1,5 @@
 name: Device report
-description: You ran the check command on a Razer mouse and it got to the end. Tell us what happened.
+description: You ran the check command on a Razer mouse or keyboard and it got to the end. Tell us what happened.
 title: "[Device report] "
 labels: ["device report"]
 body:
@@ -9,12 +9,12 @@ body:
         Thanks for testing. Close Synapse, stop the daemon if it runs (`schtasks /End /TN DemonNapse`),
         then run `demonnapse.exe check` from a terminal: it opens its own window and saves the report as
         `demonnapse-check-XXXX.txt` next to `demonnapse.exe`.
-        The report shows the mouse's PID and firmware version and the names of your on-board profiles,
+        The report shows the device's PID and firmware version and the names of your on-board profiles,
         no serial numbers; read it before pasting.
   - type: input
     id: model
     attributes:
-      label: Mouse model
+      label: Mouse or keyboard model
       description: The full name, and whether it is plugged in by cable.
       placeholder: Razer Basilisk V3 (wired)
     validations:
@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: DemonNapse version
-      placeholder: "1.1.0"
+      placeholder: "1.3.0"
     validations:
       required: true
   - type: textarea
@@ -37,7 +37,7 @@ body:
   - type: dropdown
     id: leds
     attributes:
-      label: Did every LED light up in turn (red, green, blue, then one at a time in white, as you answered in the report)?
+      label: Did every LED light up in turn (red, green, blue, then one at a time in white, or one row at a time on a keyboard, as you answered in the report)?
       options:
         - "Yes, all of them"
         - "Some did not light up, or lit in the wrong order"
@@ -52,6 +52,7 @@ body:
         - "Yes"
         - "No"
         - "This mouse has no profile button"
+        - "It is a keyboard: check skips this step"
     validations:
       required: true
   - type: textarea

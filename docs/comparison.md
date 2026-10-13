@@ -4,7 +4,7 @@ Back to the [README](../README.md). Checked in October 2026.
 
 As far as I could find, no other project plays your Chroma Studio effects with Synapse closed,
 binds an effect to each on-board profile, or hands the mouse over to Synapse and back by
-itself. It is also small: a single 587 KB executable using 1.5–2 MB of private memory, where
+itself. It is also small: a single 603 KB executable using 1.5–2 MB of private memory, where
 most alternatives declare 14–40 MB.
 
 Other people noticed how heavy Synapse is, and their projects are good at things DemonNapse

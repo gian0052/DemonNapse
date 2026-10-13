@@ -121,6 +121,9 @@ fn probe() -> Result<(), String> {
     println!("active slot: {:?}", razerhid::get_active_profile(&ctl));
     println!("mode: {:?} (0 = normal, 3 = driver)", razerhid::get_device_mode(&ctl));
     println!("event interfaces: {}", razerhid::open_events(&api, pid).len());
+    for line in check::fingerprint(&ctl) {
+        println!("{line}");
+    }
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 name: Device support request
-description: The check command stops with an error or does not find your Razer mouse.
+description: The check command stops with an error or does not find your Razer mouse or keyboard.
 title: "[Device support] "
 labels: ["device support"]
 body:
@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         DemonNapse is verified on the Razer Basilisk V3 35K (wired) only. Other Razer mice, wired or
-        through their wireless dongle, should work but have not been tried yet; keyboards are not supported.
-        For a Razer mouse that `check` cannot handle, fill this in: the more of it you can provide, the
+        through their wireless dongle, should work but have not been tried yet; keyboards are not driven yet,
+        but `check` can test one. For a Razer mouse or keyboard that `check` cannot handle, fill this in: the more of it you can provide, the
         more likely the model gets added.
   - type: input
     id: model

@@ -36,6 +36,16 @@ Sources, facts only (IDs, counts, zone names), no code copied:
   how the profile commands (`0x05/0x80..0x84`, `0x05/0x04`) behave; that still has to come from
   reports of real mice.
 
+## What the mouse says about itself
+
+From version 1.3.0 `check` asks the mouse for its lighting zones with the read command
+`0x0F/0x80`. The answer is five bytes per zone, `zone 19 03 rows columns`, in the order of the
+LED indices. The Basilisk V3 35K answers `04 19 03 01 01`, `01 19 03 01 01`, `0A 19 03 01 09`:
+logo 1, scroll wheel 1, strip 9, which is the layout verified by eye below. Zone ids seen so
+far: `01` scroll wheel, `04` logo, `0A` strip, `05` the keys of a keyboard (several rows). When
+a mouse answers, `check` uses that count before the tables on this page; the tables stay as
+the fallback for mice that do not answer.
+
 ## Layouts verified by eye
 
 Where a mouse was walked with `check` (one LED at a time, the owner saying where each one is). LED

@@ -18,10 +18,10 @@ talk to the mouse, `probe`):
 
 | command | what it does |
 |---|---|
-| `check [PID]` | tries a Razer mouse step by step in its own window (see [Devices](../README.md#devices)) and saves the report as `demonnapse-check-XXXX.txt` |
+| `check [PID]` | tries a Razer mouse (or a keyboard) step by step in its own window (see [Devices](../README.md#devices)) and saves the report as `demonnapse-check-XXXX.txt` |
 | `extract [--out FOLDER]` | effects and profiles from Synapse's logs, written next to `config.json` or in `FOLDER` |
 | `profiles` | profile → matched effect, as JSON |
-| `probe` | firmware, active slot and device mode of the mouse |
+| `probe` | firmware, active slot and device mode of the mouse, and its answers to the read commands `check` sends |
 | `audio [seconds]` | output peak, 10 readings a second (default 3 s) |
 | `synapse [--kill NAME.exe]` | is Synapse open, are we admin, state of the Razer services; `--kill` closes one process the way the daemon closes Synapse |
 | `render "<effect>" <t0> <frames> <fps>` | frames of an effect from time `t0` (seconds), one line of hex colours per frame |
