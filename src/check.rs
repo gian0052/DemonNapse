@@ -1,5 +1,6 @@
-//! `demonnapse check [PID]`: tests step by step whether a Razer mouse works with DemonNapse and writes
-//! a report to attach to an issue. It is for people with a model other than the Basilisk V3 35K, so it
+//! `demonnapse check [PID...]`: lists the connected Razer devices, lets the user choose which ones to
+//! check (Enter = all), then tests each one step by step and writes one report per device to attach to
+//! an issue. It is for people with a model other than the Basilisk V3 35K, so it
 //! works without config.json, says what the mouse is from the tables in `mice`, asks the user about
 //! every LED and saves the report next to the executable.
 //! Reads only, plus switching the active slot (like the button, then back as it was) and a few
@@ -7,7 +8,7 @@
 //! A keyboard (a device that declares a grid of several rows) gets its own last step, all in the same
 //! run: the keys in three colours, one row at a time, the first and last column, a bar crossing it.
 
-use crate::config::{self, Config};
+use crate::config::Config;
 use crate::layers::Rgb;
 use crate::mice::{self, Known};
 use crate::{extract, razerhid, synapse};
@@ -235,10 +236,12 @@ fn keyboard_steps(r: &mut Report, h: &HidDevice, keys: &Receiver<Option<String>>
     let all = answered(hold_grid(h, &full((0, 0, 255)), keys));
     r.note(format!("  all keys red, green, blue: {all}"));
 
-    tell("Now one row of keys at a time lights up white. For each one type which row it is, counting from");
-    tell("the top (1 = the row of Esc), and press Enter. n = nothing lit. If only some keys are lit, write which.");
-    let mut seen = 0;
-    for row in 0..rows {
+    let mut seen = usize::from(rows == 1); // one row: the step above already said whether it lights
+    if rows > 1 {
+        tell("Now one row of keys at a time lights up white. For each one type which row it is, counting from");
+        tell("the top (1 = the row of Esc), and press Enter. n = nothing lit. If only some keys are lit, write which.");
+    }
+    for row in (0..rows).filter(|_| rows > 1) {
         ask(&format!("  row {} of {rows}:", row + 1));
         let a = hold_grid(h, &grid_where(rows, cols, |y, _| y == row), keys);
         if a.is_none() {
@@ -247,23 +250,29 @@ fn keyboard_steps(r: &mut Report, h: &HidDevice, keys: &Receiver<Option<String>>
         seen += usize::from(a.as_deref().is_some_and(|a| !matches!(a.to_lowercase().as_str(), "n" | "no")));
         r.note(format!("  row {} of {rows}: {}", row + 1, answered(a)));
     }
-    tell("Now one column at a time. Write the keys that are lit, from the top.");
-    ask("  first column:");
-    let first = answered(hold_grid(h, &grid_where(rows, cols, |_, x| x == 0), keys));
-    r.note(format!("  first column: {first}"));
-    ask(&format!("  last column ({cols}):"));
-    let last = answered(hold_grid(h, &grid_where(rows, cols, |_, x| x == cols - 1), keys));
-    r.note(format!("  last column ({cols}): {last}"));
-    tell("Last one: a white bar crosses the keyboard twice.");
-    for _ in 0..2 {
-        for col in 0..cols {
-            show_grid(h, &grid_where(rows, cols, |_, x| x == col), 0.15);
+    let (mut first, mut last, mut bar) = ["one column only, not asked".to_string(), String::new(), String::new()].into();
+    if cols > 1 {
+        tell("Now one column at a time. Write the keys that are lit, from the top.");
+        ask("  first column:");
+        first = answered(hold_grid(h, &grid_where(rows, cols, |_, x| x == 0), keys));
+        r.note(format!("  first column: {first}"));
+        ask(&format!("  last column ({cols}):"));
+        last = answered(hold_grid(h, &grid_where(rows, cols, |_, x| x == cols - 1), keys));
+        r.note(format!("  last column ({cols}): {last}"));
+        tell("Last one: a white bar crosses the keyboard twice.");
+        for _ in 0..2 {
+            for col in 0..cols {
+                show_grid(h, &grid_where(rows, cols, |_, x| x == col), 0.15);
+            }
         }
+        while keys.try_recv().is_ok() {}
+        ask(">> Did the bar go from left to right without jumps? Enter = yes, n = no, or write what you saw:");
+        bar = answered(hold_grid(h, &full(BLACK), keys));
+        r.note(format!("  bar from left to right: {bar}"));
+    } else {
+        // a keyboard of one colour: nothing more to light
+        show_grid(h, &full(BLACK), 0.2);
     }
-    while keys.try_recv().is_ok() {}
-    ask(">> Did the bar go from left to right without jumps? Enter = yes, n = no, or write what you saw:");
-    let bar = answered(hold_grid(h, &full(BLACK), keys));
-    r.note(format!("  bar from left to right: {bar}"));
 
     say!(r, "\n== Summary ==");
     say!(r, "device: {device}");
@@ -303,26 +312,60 @@ fn describe(pid: u16) -> String {
     }
 }
 
-/// The device to check: the PID given, the one in config.json, the one Synapse calls a mouse, the only
-/// connected device the tables know as a mouse, otherwise (no mouse) the only keyboard for Synapse.
-fn pick(args: &[String], cfg: Option<&Config>, seen: &[(u16, String)], categories: &HashMap<u16, String>) -> Result<(u16, &'static str), String> {
-    if let Some(a) = args.first() {
-        let pid = u16::from_str_radix(a.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| format!("'{a}' is not a PID like 0x00CB"))?;
-        return Ok((pid, "given on the command line"));
+/// What a connected device probably is, for the list the user chooses from: Synapse's word for it,
+/// else "mouse" if the tables know it, else unknown (a keyboard tells its grid only once opened).
+fn kind(pid: u16, categories: &HashMap<u16, String>) -> String {
+    match categories.get(&pid) {
+        Some(c) => c.clone(),
+        None if !matches!(mice::find(pid), Known::Unknown) => "mouse".into(),
+        None => "type unknown".into(),
     }
-    if let Some(pid) = cfg.and_then(|c| c.mouse().ok()) {
-        return Ok((pid, "from config.json or found by the daemon's rule"));
+}
+
+/// The PIDs given on the command line (`check 0x0099 0x02A2`).
+fn given(args: &[String]) -> Result<Vec<u16>, String> {
+    args.iter()
+        .map(|a| u16::from_str_radix(a.trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|_| format!("'{a}' is not a PID like 0x00CB")))
+        .collect()
+}
+
+/// The user's answer to "which ones?": Enter = all, otherwise the numbers of the list (1 = first),
+/// separated by spaces or commas. Indices into the list, in the order typed, without repeats.
+fn parse_choice(answer: &str, n: usize) -> Result<Vec<usize>, String> {
+    let words: Vec<&str> = answer.split([' ', ',', ';']).filter(|w| !w.is_empty()).collect();
+    if words.is_empty() {
+        return Ok((0..n).collect());
     }
-    let synapse = config::choose_mouse(seen, categories);
-    if let Ok((pid, _)) = synapse {
-        return Ok((pid, "the one Synapse calls a mouse"));
+    let mut picked = Vec::new();
+    for w in words {
+        match w.parse::<usize>() {
+            Ok(k) if (1..=n).contains(&k) => {
+                if !picked.contains(&(k - 1)) {
+                    picked.push(k - 1);
+                }
+            }
+            _ => return Err(format!("'{w}' is not a number from 1 to {n}")),
+        }
     }
-    let known: Vec<u16> = seen.iter().map(|(p, _)| *p).filter(|&p| !matches!(mice::find(p), Known::Unknown)).collect();
-    let keyboards: Vec<u16> = seen.iter().map(|(p, _)| *p).filter(|p| categories.get(p).is_some_and(|c| c == "keyboard")).collect();
-    match (&known[..], &keyboards[..]) {
-        (&[pid], _) => Ok((pid, "the only connected Razer mouse in the tables")),
-        (&[], &[pid]) => Ok((pid, "no mouse: the only Razer keyboard for Synapse")),
-        _ => Err(format!("{} (run check 0x00XX with the PID of the mouse, from the list above)", synapse.unwrap_err())),
+    Ok(picked)
+}
+
+/// Asks which of the connected devices to check. One device, or nothing to answer with: all of them.
+fn choose(seen: &[(u16, String)], keys: &Receiver<Option<String>>) -> Vec<u16> {
+    if seen.len() < 2 {
+        return seen.iter().map(|(p, _)| *p).collect();
+    }
+    while keys.try_recv().is_ok() {}
+    loop {
+        ask(">> Which ones to check? Enter = all of them, or type their numbers (e.g. 1 3) and press Enter:");
+        let Ok(Some(answer)) = keys.recv() else {
+            println!();
+            return seen.iter().map(|(p, _)| *p).collect();
+        };
+        match parse_choice(&answer, seen.len()) {
+            Ok(picked) => return picked.into_iter().map(|i| seen[i].0).collect(),
+            Err(e) => tell(&format!("{e}, try again.")),
+        }
     }
 }
 
@@ -359,23 +402,23 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         let _ = FreeConsole();
         let _ = AllocConsole();
     }
-    let mut r = Report { text: String::new(), path: None };
     let keys = keyboard();
-    let result = steps(dir, args, &mut r, &keys);
+    let mut head = Report { text: String::new(), path: None };
+    let mut saved = Vec::new();
+    let result = all_steps(dir, args, &mut head, &keys, &mut saved);
     if let Err(e) = &result {
-        say!(r, "\nstopped: {e}");
+        say!(head, "\nstopped: {e}");
+        saved.push(save(dir, 0, &head.text)); // stopped before any device was checked
     }
     println!();
-    let saved = match r.path.clone() {
-        Some(p) => Ok(p),
-        None => save(dir, 0, &r.text), // stopped before the mouse was picked
-    };
-    match saved {
-        Ok(path) => {
-            tell(&format!("Done. Report saved as {}", path.display()));
-            tell("Attach it to a device report: https://github.com/gian0052/DemonNapse/issues/new?template=device_report.yml");
+    for s in &saved {
+        match s {
+            Ok(path) => tell(&format!("Report saved as {}", path.display())),
+            Err(e) => tell(&format!("A report could not be saved ({e}): copy the text above.")),
         }
-        Err(e) => tell(&format!("The report could not be saved ({e}): copy the text above.")),
+    }
+    if saved.iter().any(Result::is_ok) {
+        tell("Done. Attach the reports to a device report: https://github.com/gian0052/DemonNapse/issues/new?template=device_report.yml");
     }
     // seen on the Basilisk V3 35K: after check the LEDs are off, the profile button brings back the
     // effect saved in the mouse, opening Synapse brings back the Chroma Studio effects
@@ -387,23 +430,54 @@ pub fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     result
 }
 
-fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<String>>) -> Result<(), String> {
+/// The list of devices, the user's choice, then every chosen device in turn, each with its own report
+/// that starts with the list. A device that stops with an error does not stop the next one.
+fn all_steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<String>>, saved: &mut Vec<Result<PathBuf, String>>) -> Result<(), String> {
     say!(r, "DemonNapse check {}", env!("CARGO_PKG_VERSION"));
-    tell("About two minutes. Do what the lines marked >> say; the rest is the report.");
+    tell("About two minutes for each device. Do what the lines marked >> say; the rest is the report.");
     say!(r, "\n[1] Razer devices connected");
     let mut api = HidApi::new().map_err(|e| e.to_string())?;
     let seen = razerhid::connected(&api);
+    if seen.is_empty() && args.is_empty() {
+        return Err("no Razer device found: is it plugged in?".into());
+    }
     let categories = extract::categories();
-    for (pid, name) in &seen {
+    for (i, (pid, name)) in seen.iter().enumerate() {
         let synapse = categories.get(pid).map_or("type unknown to Synapse", String::as_str);
-        say!(r, "  PID 0x{pid:04X}  {name}  ({synapse}; {})", mice::name(*pid).unwrap_or("not in the tables"));
+        say!(r, "  {}  PID 0x{pid:04X}  {name}  ({synapse}; {})", i + 1, mice::name(*pid).unwrap_or("not in the tables"));
     }
     let cfg = Config::load(dir).ok();
     say!(r, "  config.json: {}", if cfg.is_some() { "found" } else { "not found, not needed by check" });
-    let (pid, how) = pick(args, cfg.as_ref(), &seen, &categories)?;
-    r.path = save(dir, pid, &r.text).ok(); // from here on every line goes to the file at once
-    let name = seen.iter().find(|(p, _)| *p == pid).map_or("", |(_, n)| n.as_str());
-    say!(r, "  checking PID 0x{pid:04X} {name} ({how})");
+    let (chosen, how) = if args.is_empty() {
+        if seen.len() > 1 {
+            tell("Razer devices found:");
+            for (i, (pid, name)) in seen.iter().enumerate() {
+                tell(&format!("  {}  {name} (PID 0x{pid:04X}, {})", i + 1, kind(*pid, &categories)));
+            }
+        }
+        (choose(&seen, keys), "chosen from the list")
+    } else {
+        (given(args)?, "given on the command line")
+    };
+    let list = chosen.iter().map(|p| format!("0x{p:04X}")).collect::<Vec<_>>().join(" ");
+    say!(r, "  devices to check: {list} ({how})");
+    let total = chosen.len();
+    for (i, &pid) in chosen.iter().enumerate() {
+        let name = seen.iter().find(|(p, _)| *p == pid).map_or("", |(_, n)| n.as_str());
+        println!();
+        tell(&format!("Device {} of {total}: {name} (PID 0x{pid:04X}). Look at this one now.", i + 1));
+        let mut d = Report { text: r.text.clone(), path: None };
+        d.path = save(dir, pid, &d.text).ok(); // from here on every line goes to the file at once
+        if let Err(e) = steps(pid, name, cfg.as_ref(), &mut api, &mut d, keys) {
+            say!(d, "\nstopped: {e}");
+        }
+        saved.push(d.path.clone().ok_or_else(|| format!("demonnapse-check-{pid:04X}.txt")));
+    }
+    Ok(())
+}
+
+fn steps(pid: u16, name: &str, cfg: Option<&Config>, api: &mut HidApi, r: &mut Report, keys: &Receiver<Option<String>>) -> Result<(), String> {
+    say!(r, "\n  checking PID 0x{pid:04X} {name}");
     say!(r, "  model: {}", describe(pid));
     let connection = mice::name(pid).and_then(mice::connection);
     say!(r, "  connection: {}", connection.unwrap_or("not told by the PID (say it in the issue: cable, dongle or Bluetooth)"));
@@ -412,7 +486,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     }
 
     say!(r, "\n[2] Control interface");
-    let (ctl, resp) = razerhid::open_control(&mut api, pid, 2).map_err(|e| format!("{e}: this device does not answer the Razer protocol the way DemonNapse speaks it"))?;
+    let (ctl, resp) = razerhid::open_control(api, pid, 2).map_err(|e| format!("{e}: this device does not answer the Razer protocol the way DemonNapse speaks it"))?;
     say!(r, "  transaction id: 0x{:02X}", razerhid::transaction_id());
     say!(r, "  firmware: {}.{}", resp[8], resp[9]);
     say!(r, "  device mode: {:?} (0 = normal, 3 = driver)", razerhid::get_device_mode(&ctl));
@@ -459,7 +533,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     say!(r, "  number of profiles (05/80): {}", count.map_or("NO".into(), |r| hex(&r[8..10])));
     say!(r, "  slots (05/81): {}", slots.map_or("NO".into(), |r| hex(&r[8..18])));
     say!(r, "  active slot (05/84): {}", active.map_or("NO".into(), |s| s.to_string()));
-    let skip = cfg.as_ref().map_or(vec![1], |c| c.skip_slots.clone());
+    let skip = cfg.map_or(vec![1], |c| c.skip_slots.clone());
     if !profiles.is_empty() {
         say!(r, "  {}", slot1_note(&profiles, &skip));
     }
@@ -498,7 +572,7 @@ fn steps(dir: &Path, args: &[String], r: &mut Report, keys: &Receiver<Option<Str
     while keys.try_recv().is_ok() {} // an Enter typed earlier does not count
     tell(&format!("Press Enter, then press the profile button under the mouse a few times, for {BUTTON_SECONDS} seconds."));
     let _ = keys.recv(); // starts on Enter; without a keyboard it starts at once
-    let events = razerhid::open_events(&api, pid);
+    let events = razerhid::open_events(api, pid);
     let mut buf = [0u8; 64];
     let (mut n_events, mut slots_seen) = (0, vec![active]);
     let start = Instant::now();
@@ -657,17 +731,21 @@ mod tests {
     }
 
     #[test]
-    fn picks_from_the_tables_when_synapse_does_not_know() {
-        let seen = vec![(0x0090, "Razer Naga Pro".to_string()), (0x028F, "some keyboard".to_string())];
+    fn choosing_devices() {
+        assert_eq!(parse_choice("", 3).unwrap(), vec![0, 1, 2], "Enter = all");
+        assert_eq!(parse_choice("  ", 3).unwrap(), vec![0, 1, 2]);
+        assert_eq!(parse_choice("1 3", 3).unwrap(), vec![0, 2]);
+        assert_eq!(parse_choice("3,1, 3", 3).unwrap(), vec![2, 0], "in the order typed, no repeats");
+        assert!(parse_choice("4", 3).is_err());
+        assert!(parse_choice("0", 3).is_err());
+        assert!(parse_choice("mouse", 3).is_err());
+        assert_eq!(given(&["0x0099".into(), "02A2".into()]).unwrap(), vec![0x0099, 0x02A2]);
+        assert!(given(&["zz".into()]).is_err());
+        // what Cry's check listed on 2026-11-11: Synapse knew none of the three
         let none = HashMap::new();
-        assert_eq!(pick(&[], None, &seen, &none).unwrap().0, 0x0090);
-        assert_eq!(pick(&["0x00CB".into()], None, &seen, &none).unwrap().0, 0x00CB, "the PID given wins");
-        assert!(pick(&["zz".into()], None, &seen, &none).is_err());
-        // a keyboard alone is checked without typing its PID; next to a mouse the mouse still wins
-        let keyboard: HashMap<u16, String> = [(0x0287, "keyboard".to_string())].into();
-        let alone = vec![(0x0287, "Razer BlackWidow V4".to_string())];
-        assert_eq!(pick(&[], None, &alone, &keyboard).unwrap().0, 0x0287);
-        let both = vec![(0x0090, "Razer Naga Pro".to_string()), (0x0287, "Razer BlackWidow V4".to_string())];
-        assert_eq!(pick(&[], None, &both, &keyboard).unwrap().0, 0x0090);
+        assert_eq!(kind(0x0099, &none), "mouse");
+        assert_eq!(kind(0x02A2, &none), "type unknown");
+        let synapse: HashMap<u16, String> = [(0x02A2, "keyboard".to_string())].into();
+        assert_eq!(kind(0x02A2, &synapse), "keyboard");
     }
 }

@@ -196,9 +196,11 @@ pub fn single_row(zones: &[(u8, usize, usize)]) -> Option<usize> {
     (zones.iter().all(|z| z.1 == 1) && total <= MAX_FRAME_LEDS).then_some(total)
 }
 
-/// Rows and columns of the first zone that is a grid of several rows: a keyboard.
+/// Rows and columns of the keys of a keyboard: the zone with id 05 (the keys in every keyboard firmware
+/// read), or else the first grid of several rows. The firmware of the Ornata V3 X declares 05 1 x 1 (the
+/// whole keyboard one colour), the Ornata V3 05 1 x 10: one row, but keys, not the LEDs of a mouse.
 pub fn grid(zones: &[(u8, usize, usize)]) -> Option<(usize, usize)> {
-    zones.iter().find(|z| z.1 > 1).map(|z| (z.1, z.2))
+    zones.iter().find(|z| z.0 == 0x05).or_else(|| zones.iter().find(|z| z.1 > 1)).map(|z| (z.1, z.2))
 }
 
 /// The name of a lighting zone id of class 0x0F.
@@ -249,6 +251,9 @@ mod tests {
         let keys = parse_zones(&[0x05, 0x19, 0x03, 0x06, 0x18]).unwrap();
         assert_eq!((keys.clone(), single_row(&keys)), (vec![(0x05, 6, 24)], None));
         assert_eq!((grid(&keys), grid(&zones)), (Some((6, 24)), None));
+        // the firmware of the Ornata V3 X and of the Ornata V3: keys in one row are still a keyboard
+        assert_eq!(grid(&parse_zones(&[0x05, 0x19, 0x03, 0x01, 0x01]).unwrap()), Some((1, 1)));
+        assert_eq!(grid(&parse_zones(&[0x05, 0x19, 0x03, 0x01, 0x0A]).unwrap()), Some((1, 10)));
     }
 
     #[test]
