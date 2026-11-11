@@ -1,7 +1,7 @@
 # DemonNapse
 
 ![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-green)
-![Rust](https://img.shields.io/badge/rust-single%20603%20KB%20exe-orange)
+![Rust](https://img.shields.io/badge/rust-single%20607%20KB%20exe-orange)
 ![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
 ![Tested on: Basilisk V3 35K](https://img.shields.io/badge/tested%20on-Basilisk%20V3%2035K-44D62C)
 
@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/45d69d0a-e1d3-46b5-bd68-252f78d5a65e
 Synapse's editor is fine; what's heavy is keeping it running. So DemonNapse does not give you
 a new editor to learn: it leaves the editing to Razer's own apps and takes over the playing.
 Build your profiles in Synapse and your lighting in Chroma Studio, as you always did. When you
-are done, close Synapse: DemonNapse (603 KB, under 2 MB of memory) takes its place and plays
+are done, close Synapse: DemonNapse (607 KB, under 2 MB of memory) takes its place and plays
 your Chroma Studio effects, one per on-board profile, switched with the profile button. Want
 to change something? Open Synapse again, edit, close it: DemonNapse picks up the new version
 by itself.
@@ -63,7 +63,7 @@ like Chroma Studio and only want it to stop running all day. [More projects comp
 |---|---|---|
 | RAM (private working set) | ~600 MB in the tray, ~940 MB with the window open | 1.5–2 MB |
 | CPU | — | ~0.1 % of one core, ~0.3 % with the Audio Meter following music |
-| Executable | — | one 603 KB file |
+| Executable | — | one 607 KB file |
 
 <sub>Measured on the author's PC (Windows 11, Basilisk V3 35K, Synapse 4) on 11 October 2026,
 all Razer processes summed. One machine, not a benchmark; yours will differ.</sub>
@@ -107,20 +107,21 @@ keyboard plugged in next to it is left alone.
 
 **Own a different Razer mouse? Two minutes of yours put it on the list.** Close Synapse (and
 stop the daemon if it is installed: `schtasks /End /TN DemonNapse`), then run
-`demonnapse.exe check`. It opens its own window and in about two minutes tells you which
+`demonnapse.exe check`. It opens its own window and lists every Razer device it finds, then asks
+which ones to test: press Enter for all of them, or type their numbers. Each one gets its own
+report. For a mouse, in about two minutes it tells you which
 model it found (from the tables in [Razer mice](docs/razer-mice.md)), opens the mouse, reads
 its profiles, asks the mouse itself how many LEDs it has and in which zones, asks you to press
 the profile button and lights the LEDs one at a time, asking you whether each one lit. No `config.json` is needed and nothing is written to the mouse
-memory. It saves the report as `demonnapse-check-XXXX.txt` next to `demonnapse.exe`: attach it
+memory. It saves each report as `demonnapse-check-XXXX.txt` next to `demonnapse.exe`: attach it
 to a [device report](../../issues/new?template=device_report.yml), or to a
 [device support request](../../issues/new?template=device_support.yml) if `check` stops with
 an error.
 
 **A Razer keyboard too.** DemonNapse does not play effects on keyboards yet, but `check`
-recognises one (with no Razer mouse connected it picks the keyboard by itself, otherwise run
-`demonnapse.exe check 0xPID` with the PID it lists). It reads the rows and columns the keyboard
-declares and lights the keys in three colours, then one row and one column at a time: about ten
-answers, and the report holds what is needed to add that keyboard. This part is written from
+recognises one, also next to a mouse in the same run, and also a keyboard with a single lighting
+zone (like the Ornata V3 X). It reads the rows and columns the keyboard declares and lights the
+keys in three colours, then one row and one column at a time: about ten answers, and the report holds what is needed to add that keyboard. This part is written from
 the protocol and has not been tried on a real keyboard yet.
 
 ## Before you install

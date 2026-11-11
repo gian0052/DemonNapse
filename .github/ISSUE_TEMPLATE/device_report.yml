@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: DemonNapse version
-      placeholder: "1.3.0"
+      placeholder: "1.4.0"
     validations:
       required: true
   - type: textarea
